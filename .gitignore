@@ -10,3 +10,5 @@ backups/
 frontend/node_modules/
 web/build/
 frontend/*.tsbuildinfo
+
+.scratch/html-conversion/

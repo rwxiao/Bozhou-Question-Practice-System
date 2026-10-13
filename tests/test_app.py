@@ -204,3 +204,18 @@ def test_login_role_choice_must_match_account(system):
     assert client.post('/api/login', json={'username':'worker', 'password':'Worker-test-12345', 'role':'admin'}).status_code == 403
     assert client.get('/api/me').status_code == 401
     assert client.post('/api/login', json={'username':'worker', 'password':'Worker-test-12345', 'role':'user'}).status_code == 200
+
+
+def test_five_options_import_and_scoring(system):
+    admin = TestClient(system.app)
+    login(admin)
+    bid = admin.post('/api/banks', json={'title':'五选项题库'}).json()['id']
+    text = '编号,题型,题干,A,B,C,D,E,答案,解析,分类,标签\nF1,多选,选五项中的两项,一,二,三,四,五,A|E,解析,基础,测试\n'
+    p = import_bank(admin, bid, text)
+    assert p['errors'] == []
+    admin.post(f"/api/imports/{p['id']}/commit")
+    admin.post(f'/api/banks/{bid}/publish', json={'revision':1})
+    s = admin.post('/api/sessions', json={'bank_id':bid,'amount':'20','mode':'顺序练习'}).json()
+    assert s['questions'][0]['options']['E'] == '五'
+    r = admin.post(f"/api/sessions/{s['id']}/answer", json={'revision':0,'index':0,'selected':['A','E']})
+    assert r.json()['answers']['0']['correct'] is True

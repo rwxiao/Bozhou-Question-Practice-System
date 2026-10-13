@@ -268,9 +268,11 @@ def bank_view(b, u):
     return {k: b[k] for k in ('id', 'title', 'status', 'revision')} | {'count': len(active), 'categories': sorted({q['category'] for q in active if q['category']})}
 
 
-HEADERS = ['编号', '题型', '题干', 'A', 'B', 'C', 'D', '答案', '解析', '分类', '标签']
+HEADERS = ['编号', '题型', '题干', 'A', 'B', 'C', 'D', 'E', '答案', '解析', '分类', '标签']
 EXAMPLES = [['Q1', '单选', '一加一等于？', '一', '二', '三', '', 'B', '一加一等于二。', '基础', '数学'], ['Q2', '多选', '哪些是偶数？', '二', '三', '四', '', 'A|C', '二和四是偶数。', '基础', '数学'], ['Q3', '判断', '地球是平的。', '', '', '', '', '错误', '地球不是平的。', '地理', '常识']]
 
+LEGACY_HEADERS = [h for h in HEADERS if h != 'E']
+EXAMPLES = [row[:7] + [''] + row[7:] for row in EXAMPLES]
 
 @app.get('/api/template.{format}')
 def template(format: str, request: Request):
@@ -314,7 +316,7 @@ def parse_file(raw, filename, bid):
         raise
     except Exception:
         fail(400, '无法读取文件，请使用下载的模板和 UTF-8 编码')
-    if not rows or rows[0] != HEADERS:
+    if not rows or rows[0] not in (HEADERS, LEGACY_HEADERS):
         fail(400, '表头必须与模板完全一致')
     if len(rows) > 10001:
         fail(400, '最多导入 10000 题')
@@ -322,10 +324,11 @@ def parse_file(raw, filename, bid):
     for line, row in enumerate(rows[1:], 2):
         if not any(row):
             continue
-        if len(row) != len(HEADERS):
+        if len(row) != len(rows[0]):
             errors.append({'row': line, 'field': '列数', 'message': '列数与模板不一致'})
             continue
-        r = dict(zip(HEADERS, [str(x).strip() for x in row]))
+        r = dict(zip(rows[0], [str(x).strip() for x in row]))
+        r.setdefault('E', '')
         problems = []
         if not r['编号'] or len(r['编号']) > 64 or r['编号'] in codes:
             problems.append(('编号', '编号必填、最多64字符且文件内不能重复'))
@@ -334,7 +337,7 @@ def parse_file(raw, filename, bid):
             problems.append(('题干', '题干必填且最多10000字符'))
         if r['题型'] not in ('单选', '多选', '判断'):
             problems.append(('题型', '仅支持单选、多选、判断'))
-        options = {key: r[key] for key in 'ABCD' if r[key]}
+        options = {key: r[key] for key in 'ABCDE' if r[key]}
         answer = r['答案'].split('|')
         if r['题型'] == '判断':
             options = {'A': '正确', 'B': '错误'}
