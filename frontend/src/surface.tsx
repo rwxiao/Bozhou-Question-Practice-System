@@ -2,7 +2,7 @@
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import parse, { attributesToProps, domToReact, Element, type DOMNode, type HTMLReactParserOptions } from 'html-react-parser';
-import type { ReactNode, ComponentProps } from 'react';
+import { useState, type ReactNode, type ComponentProps } from 'react';
 import { Network, LayoutDashboard, Library, History, Bookmark, MessageSquare, Settings, Users, LogOut, LockKeyhole, ArrowRight, FileQuestion, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
@@ -33,6 +33,14 @@ function has(node: Element, name: string) { return (node.attribs.class || '').sp
 function text(node: DOMNode): string { return node.type === 'text' ? node.data : node instanceof Element ? node.children.map(n=>text(n as DOMNode)).join('') : ''; }
 function ancestor(node: Element, name: string): Element | null { let p=node.parent; while(p){if(p instanceof Element && p.name===name)return p;p=p.parent;}return null; }
 function inputId(node: Element) { return node.attribs.id || `${ancestor(node,'form')?.attribs.id || 'control'}-${node.attribs.name || 'value'}`; }
+
+const themeOptions = [{id:'teal',name:'青绿 · 清新学习'},{id:'indigo',name:'靛紫 · 专注学习'},{id:'navy',name:'海军蓝 · 沉稳办公'}];
+function storedTheme() {try{const theme=localStorage.getItem('bozhou-ui-theme');return themeOptions.some(t=>t.id===theme)?theme!:'teal';}catch{return 'teal';}}
+document.documentElement.dataset.theme=storedTheme();
+function ThemeSelect(){
+ const [theme,setTheme]=useState(storedTheme);
+ return <div className="theme-picker"><label htmlFor="page-palette">配色</label><NativeSelect id="page-palette" value={theme} onChange={event=>{const next=event.target.value;setTheme(next);document.documentElement.dataset.theme=next;try{localStorage.setItem('bozhou-ui-theme',next);}catch{/* Theme still applies in memory. */}}}>{themeOptions.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</NativeSelect></div>;
+}
 
 function action(node: Element) {
   const props = attributesToProps(node.attribs) as ComponentProps<'button'> & Record<string,string>;
@@ -67,7 +75,7 @@ function panel(node: Element) {
   const rest=nodes.filter(n=>n!==title&&n!==footer);
   const content=has(node,'question')?questionBody(rest):domToReact(rest,options);
   return <Card className={cn(node.attribs.class)}>
-    {title?<CardHeader><CardTitle><h2>{children(title)}</h2></CardTitle>{has(node,'question')?<CardDescription>提交后查看正确答案与解析</CardDescription>:null}</CardHeader>:null}
+    {title?<CardHeader><CardTitle><h2>{children(title)}</h2></CardTitle>{has(node,'question')?<CardDescription>提交后查看正确答案与解析</CardDescription>:text(title)==='继续练习'?<CardDescription>进度自动保存，手机与电脑接着刷。</CardDescription>:null}</CardHeader>:null}
     <CardContent className="panel-content">{content}</CardContent>
     {footer?<><Separator/><CardFooter>{children(footer)}</CardFooter></>:null}
   </Card>;
@@ -81,7 +89,7 @@ const options: HTMLReactParserOptions = {replace(node){
     const navbuttons=nav.children.filter(n=>n instanceof Element&&n.name==='button') as Element[];
     const pages=navbuttons.filter(n=>n.attribs['data-page']);
     const account=navbuttons.filter(n=>!n.attribs['data-page']);
-    return <header className="site-header"><div className="header-top"><div className="department-brand"><div className="brand-mark"><Network aria-hidden="true"/></div><div><strong>亳州网络部在线刷题</strong><p>学习工作台</p></div></div><div className="account-nav">{account.map((n,i)=><span key={i}>{action(n)}</span>)}</div></div><nav className="main-nav" aria-label="主导航">{pages.map((n,i)=><span key={i}>{action(n)}</span>)}</nav></header>;
+    return <header className="site-header"><div className="header-top"><div className="department-brand"><div className="brand-mark"><Network aria-hidden="true"/></div><div><strong>亳州网络部在线刷题</strong><p>学习工作台</p></div></div><div className="account-nav"><ThemeSelect/>{account.map((n,i)=><span key={i}>{action(n)}</span>)}</div></div><nav className="main-nav" aria-label="主导航">{pages.map((n,i)=><span key={i}>{action(n)}</span>)}</nav></header>;
   }
   if(node.name==='main'&&has(node,'auth')){
     const title=node.children.find(n=>n instanceof Element&&n.name==='h1') as Element;
