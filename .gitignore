@@ -7,3 +7,6 @@ backups/
 .scratch/question-practice/prototype/
 *.pyc
 .mypy_cache/
+frontend/node_modules/
+web/build/
+frontend/*.tsbuildinfo

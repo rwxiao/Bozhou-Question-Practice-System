@@ -30,7 +30,7 @@ async def lifespan(application):
     yield
 
 
-app = FastAPI(title='知序在线刷题', lifespan=lifespan)
+app = FastAPI(title='亳州网络部在线刷题', lifespan=lifespan)
 
 
 @contextmanager
@@ -661,7 +661,10 @@ def resolve_report(rid: str, body: dict, request: Request):
 
 @app.get('/')
 def index():
-    return FileResponse(Path(__file__).parent / 'web' / 'index.html')
+    built = Path(__file__).parent / 'web' / 'build' / 'index.html'
+    if not built.is_file():
+        fail(503, '前端尚未构建，请在 frontend 目录执行 npm ci 和 npm run build')
+    return FileResponse(built)
 
 
-app.mount('/static', StaticFiles(directory=Path(__file__).parent / 'web'), name='static')
+app.mount('/assets', StaticFiles(directory=Path(__file__).parent / 'web' / 'build' / 'assets', check_dir=False), name='assets')

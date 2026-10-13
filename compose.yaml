@@ -1,4 +1,4 @@
-name: zhixu-practice
+name: bozhou-practice
 services:
   app:
     build: .

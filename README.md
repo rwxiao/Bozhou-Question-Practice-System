@@ -1,6 +1,19 @@
-# 知序 · 通用在线刷题网站
+# 亳州网络部在线刷题 · 通用在线刷题网站
 
 管理员统一发布题库，学习者使用用户名和密码登录。支持手机与电脑续刷、CSV/XLSX 模板导入、单选/多选/判断、顺序/随机/错题/收藏练习，以及题目版本和个人学习记录。
+
+## 前端构建
+
+前端使用 React、Tailwind v4 与 shadcn/ui（Radix）。首次启动前构建：
+
+```powershell
+Set-Location frontend
+npm ci
+npm run build
+Set-Location ..
+```
+
+构建产物在 `web/build/`，由 FastAPI 同源提供，避免跨域认证。开发时可在前端目录运行 `npm run dev`，开发服务器代理 API 到本地8000端口。源码渲染层集中于 `frontend/src/surface.tsx`，通过组件适配保留现有控制器命令及事件协议。
 
 ## 本地启动（PowerShell）
 
@@ -26,7 +39,7 @@ $env:ADMIN_PASSWORD = [System.Net.NetworkCredential]::new('', $taskAdminCredenti
 ```powershell
 .venv/Scripts/python.exe -m pytest -q
 .venv/Scripts/python.exe -m mypy app.py ops/backup.py --check-untyped-defs --ignore-missing-imports
-node --check web/app.js
+npm --prefix frontend run typecheck
 ```
 
 测试通过公开 API 和真实临时数据库验证行为；浏览器验收结果见项目验证记录。测试账号只存在于临时数据库。
