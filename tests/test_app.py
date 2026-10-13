@@ -184,3 +184,15 @@ def test_update_preserves_missing_questions_and_archive_is_a_draft(system):
     admin.post(f"/api/imports/{p['id']}/commit")
     assert admin.post(f'/api/banks/{bid}/publish', json={'revision': 5}).status_code == 200
     assert a.get('/api/banks').json()[0]['count'] == 3
+
+
+def test_admin_overview_is_separate_from_learner_access(system):
+    admin, learner = TestClient(system.app), TestClient(system.app)
+    login(admin)
+    learner.post('/api/register', json={'username':'worker', 'password':'Worker-test-12345', 'role':'admin'})
+    login(learner, 'worker', 'Worker-test-12345')
+    assert learner.get('/api/me').json()['role'] == 'user'
+    assert learner.get('/api/admin/summary').status_code == 403
+    summary = admin.get('/api/admin/summary')
+    assert summary.status_code == 200
+    assert summary.json()['learners'] == 1

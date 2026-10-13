@@ -216,6 +216,17 @@ def users(request: Request):
         return [public_user(r) for r in db.execute('SELECT * FROM users').fetchall()]
 
 
+@app.get('/api/admin/summary')
+def admin_summary(request: Request):
+    with transaction() as db:
+        user(db, request, admin=True)
+        all_banks = items(db, 'bank')
+        return {'banks': len(all_banks), 'published': sum(b['status'] == 'published' for b in all_banks),
+                'drafts': sum(b['draft'] is not None or b['status'] == 'draft' for b in all_banks),
+                'learners': db.execute("SELECT COUNT(*) FROM users WHERE role='user'").fetchone()[0],
+                'pending_reports': sum(r['status'] == '待处理' for r in items(db, 'report'))}
+
+
 @app.post('/api/users/{uid}/reset')
 def reset(uid: str, body: dict, request: Request):
     validate_password(body.get('password'))
@@ -660,6 +671,8 @@ def resolve_report(rid: str, body: dict, request: Request):
 
 
 @app.get('/')
+@app.get('/admin')
+@app.get('/learn')
 def index():
     built = Path(__file__).parent / 'web' / 'build' / 'index.html'
     if not built.is_file():

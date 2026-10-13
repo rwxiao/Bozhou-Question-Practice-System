@@ -48,3 +48,12 @@ Docker 引擎连接失败，未构建镜像或启动容器；未进行外网部�
 - 后端8项回归测试及 mypy 通过。浏览器验证普通用户登录态、工作台、继续练习、选择自动保存、提交判分、反馈弹窗、退出登录、管理员登录、文件上传及三种题型预览。没有保存或发布本次预览，原题库内容保留。
 - 浏览器日志未发现错误或警告。桌面与小屏截图为 current-screenshots/shadcn-dashboard.png 和 shadcn-mobile.png；账号操作行小屏溢出已定位并修正。
 - 新前端通过 FastAPI 同源提供构建产物；Dockerfile 改为 Node + Python 多阶段构建。Docker 引擎仍未运行，未验证实际镜像构建和部署。
+
+
+## 角色界面拆分
+
+全套9项公开 API 集成测试通过，新增测试验证普通注册无法通过 role 字段成为管理员、管理员概览拒绝普通人员且统计正确。Python类型检查与前端TypeScript/生产构建通过。
+
+浏览器验证管理员自动进入/admin且仅显示管理导航；普通人员登录/learn后显示学习导航，访问/admin#users会回到/learn而不加载人员管理。截图为current-screenshots/admin-workspace.png与learner-workspace.png。
+
+自审确认角色使用服务端返回值，前端地址与导航仅控制界面，不作为权限依据；新概览接口独立校验管理员权限。code-review技能仍未安装，本轮为自审而非独立评审。没有变更普通注册的权限或开放管理员自主注册。

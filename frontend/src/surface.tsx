@@ -27,7 +27,7 @@ const modalHost = document.createElement('div');
 document.body.append(modalHost);
 const modalRoot = createRoot(modalHost);
 let modalHTML = '', modalOpen = false, modalMessage: ReactNode = null;
-const icons: Record<string, typeof Network> = {home:LayoutDashboard,banks:Library,history:History,mistakes:Bookmark,reports:MessageSquare,admin:Settings,users:Users};
+const icons: Record<string, typeof Network> = {overview:LayoutDashboard,home:LayoutDashboard,banks:Library,history:History,mistakes:Bookmark,reports:MessageSquare,admin:Settings,users:Users};
 const children = (node: Element) => domToReact(node.children as DOMNode[], options);
 function has(node: Element, name: string) { return (node.attribs.class || '').split(' ').includes(name); }
 function text(node: DOMNode): string { return node.type === 'text' ? node.data : node instanceof Element ? node.children.map(n=>text(n as DOMNode)).join('') : ''; }
@@ -90,11 +90,11 @@ const options: HTMLReactParserOptions = {replace(node){
     const navbuttons=nav.children.filter(n=>n instanceof Element&&n.name==='button') as Element[];
     const pages=navbuttons.filter(n=>n.attribs['data-page']);
     const account=navbuttons.filter(n=>!n.attribs['data-page']);
-    return <header className="site-header"><a className="skip-link" href="#main-content">跳转到主要内容</a><div className="header-top"><div className="department-brand"><div className="brand-mark"><Network aria-hidden="true"/></div><div><strong translate="no">亳州网络部在线刷题</strong><p>学习工作台</p></div></div><div className="account-nav"><ThemeSelect/>{account.map((n,i)=><span key={i}>{action(n)}</span>)}</div></div><nav className="main-nav" aria-label="主导航">{pages.map((n,i)=><span key={i}>{action(n)}</span>)}</nav></header>;
+    return <header className="site-header"><a className="skip-link" href="#main-content">跳转到主要内容</a><div className="header-top"><div className="department-brand"><div className="brand-mark"><Network aria-hidden="true"/></div><div><strong translate="no">亳州网络部在线刷题</strong><p>{node.attribs['data-role']==='admin'?'管理员后台':'普通人员学习工作台'}</p></div></div><div className="account-nav"><ThemeSelect/>{account.map((n,i)=><span key={i}>{action(n)}</span>)}</div></div><nav className="main-nav" aria-label="主导航">{pages.map((n,i)=><span key={i}>{action(n)}</span>)}</nav></header>;
   }
   if(node.name==='main'&&has(node,'auth')){
     const title=node.children.find(n=>n instanceof Element&&n.name==='h1') as Element;
-    return <main id="main-content" tabIndex={-1} className="auth-layout"><section className="auth-intro"><Network aria-hidden="true"/><h1>亳州网络部<br/>在线刷题</h1><p>题库集中管理，学习进度随时接续。</p><div className="auth-features"><span><Library aria-hidden="true"/>统一题库</span><span><History aria-hidden="true"/>同步进度</span><span><Bookmark aria-hidden="true"/>错题复习</span></div></section><Card className="auth-card"><CardHeader><CardTitle><h2>{text(title).includes('登录')?'登录学习平台':text(title)}</h2></CardTitle><CardDescription>使用个人账号登录，继续你的学习计划。</CardDescription></CardHeader><CardContent className="panel-content">{domToReact((node.children as DOMNode[]).filter(n=>n!==title),options)}</CardContent></Card></main>;
+    return <main id="main-content" tabIndex={-1} className="auth-layout"><section className="auth-intro"><Network aria-hidden="true"/><h1>亳州网络部<br/>在线刷题</h1><p>题库集中管理，学习进度随时接续。</p><div className="auth-features"><span><Library aria-hidden="true"/>统一题库</span><span><History aria-hidden="true"/>同步进度</span><span><Bookmark aria-hidden="true"/>错题复习</span></div></section><Card className="auth-card"><CardHeader><CardTitle><h2>{text(title)}</h2></CardTitle><CardDescription>使用个人账号登录，继续你的学习计划。</CardDescription></CardHeader><CardContent className="panel-content">{domToReact((node.children as DOMNode[]).filter(n=>n!==title),options)}</CardContent></Card></main>;
   }
   if(node.name==='main'){const dashboard=node.children.some(n=>n instanceof Element&&has(n,'stats'));return <main id="main-content" tabIndex={-1} className={cn(dashboard&&'dashboard-layout')}>{children(node)}</main>;}
   if(node.name==='form'){

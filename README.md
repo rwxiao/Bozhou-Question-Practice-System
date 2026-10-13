@@ -57,3 +57,11 @@ npm --prefix frontend run typecheck
 恢复前停止应用、额外备份当前库。指定 `DATABASE` 为目标后运行 `.venv/Scripts/python.exe ops/backup.py restore --file backups/<备份文件>.db`。恢复后所有账号重新登录，学习数据保留。
 
 Docker 恢复：先 `docker compose stop app backup`，把备份保留在备份卷，执行 `docker compose run --rm --no-deps backup python ops/backup.py restore --file /backups/<备份文件>.db`，最后 `docker compose up -d app backup`。恢复完成后检查用户、题库、历史记录及统计。不要在运行中的应用上恢复。
+
+
+## 两个角色与独立界面
+
+- `/admin`：管理员后台，包含管理概览、题库导入与发布、人员密码重置及反馈处理。管理员视图在 frontend/src/admin-view.js。
+- `/learn`：普通人员工作台，包含题库、练习、历史、错题、收藏与个人反馈。学习视图在 frontend/src/learner-view.js。
+- 账号角色由服务端登录结果决定；打开某个地址不会获得对应权限。登录后自动进入自己的工作区，普通注册只创建普通人员。管理员仍由首次启动配置创建。
+- 管理员界面不加载个人练习和错题数据；管理概览使用受服务端管理员权限保护的独立统计接口。普通人员只能读取自己的学习记录和已发布题库。
