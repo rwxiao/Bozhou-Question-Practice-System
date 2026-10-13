@@ -34,12 +34,13 @@ function text(node: DOMNode): string { return node.type === 'text' ? node.data :
 function ancestor(node: Element, name: string): Element | null { let p=node.parent; while(p){if(p instanceof Element && p.name===name)return p;p=p.parent;}return null; }
 function inputId(node: Element) { return node.attribs.id || `${ancestor(node,'form')?.attribs.id || 'control'}-${node.attribs.name || 'value'}`; }
 
-const themeOptions = [{id:'teal',name:'青绿 · 清新学习'},{id:'indigo',name:'靛紫 · 专注学习'},{id:'navy',name:'海军蓝 · 沉稳办公'}];
-function storedTheme() {try{const theme=localStorage.getItem('bozhou-ui-theme');return themeOptions.some(t=>t.id===theme)?theme!:'teal';}catch{return 'teal';}}
-document.documentElement.dataset.theme=storedTheme();
+const themeOptions = [{id:'cmcc',name:'移动蓝 · 蓝绿配色'},{id:'teal',name:'青绿 · 清新学习'},{id:'indigo',name:'靛紫 · 专注学习'},{id:'navy',name:'海军蓝 · 沉稳办公'}];
+function storedTheme() {try{const theme=localStorage.getItem('bozhou-ui-theme-v2');return themeOptions.some(t=>t.id===theme)?theme!:'cmcc';}catch{return 'cmcc';}}
+function applyTheme(theme:string){document.documentElement.dataset.theme=theme;const background:Record<string,string>={cmcc:'#f3f8fc',teal:'#f4f8f7',indigo:'#f5f5fa',navy:'#f5f7fa'};document.querySelector('meta[name=theme-color]')?.setAttribute('content',background[theme]||background.cmcc);}
+applyTheme(storedTheme());
 function ThemeSelect(){
  const [theme,setTheme]=useState(storedTheme);
- return <div className="theme-picker"><label htmlFor="page-palette">配色</label><NativeSelect id="page-palette" value={theme} onChange={event=>{const next=event.target.value;setTheme(next);document.documentElement.dataset.theme=next;try{localStorage.setItem('bozhou-ui-theme',next);}catch{/* Theme still applies in memory. */}}}>{themeOptions.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</NativeSelect></div>;
+ return <div className="theme-picker"><label htmlFor="page-palette">配色</label><NativeSelect id="page-palette" value={theme} onChange={event=>{const next=event.target.value;setTheme(next);applyTheme(next);try{localStorage.setItem('bozhou-ui-theme-v2',next);}catch{/* Theme still applies in memory. */}}}>{themeOptions.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</NativeSelect></div>;
 }
 
 function action(node: Element) {
@@ -49,7 +50,7 @@ function action(node: Element) {
   const actionIcon=node.attribs['data-action']==='logout'?LogOut:node.attribs['data-action']==='password'?LockKeyhole:icons[node.attribs['data-page']];
   const Icon=actionIcon;
   return <Button {...props} className={cn(node.attribs.class, number && 'answer-number')} variant={variant} size={primary?'lg':'default'} type={props.type || (ancestor(node,'form')&&!node.attribs['data-action']?'submit':'button')}>
-    {Icon ? <Icon data-icon="inline-start" /> : null}{children(node)}{primary&&node.attribs['data-action']==='submit'?<ArrowRight data-icon="inline-end"/>:null}
+    {Icon ? <Icon data-icon="inline-start" aria-hidden="true" /> : null}{children(node)}{primary&&node.attribs['data-action']==='submit'?<ArrowRight data-icon="inline-end" aria-hidden="true"/>:null}
   </Button>;
 }
 
@@ -89,13 +90,13 @@ const options: HTMLReactParserOptions = {replace(node){
     const navbuttons=nav.children.filter(n=>n instanceof Element&&n.name==='button') as Element[];
     const pages=navbuttons.filter(n=>n.attribs['data-page']);
     const account=navbuttons.filter(n=>!n.attribs['data-page']);
-    return <header className="site-header"><div className="header-top"><div className="department-brand"><div className="brand-mark"><Network aria-hidden="true"/></div><div><strong>亳州网络部在线刷题</strong><p>学习工作台</p></div></div><div className="account-nav"><ThemeSelect/>{account.map((n,i)=><span key={i}>{action(n)}</span>)}</div></div><nav className="main-nav" aria-label="主导航">{pages.map((n,i)=><span key={i}>{action(n)}</span>)}</nav></header>;
+    return <header className="site-header"><a className="skip-link" href="#main-content">跳转到主要内容</a><div className="header-top"><div className="department-brand"><div className="brand-mark"><Network aria-hidden="true"/></div><div><strong translate="no">亳州网络部在线刷题</strong><p>学习工作台</p></div></div><div className="account-nav"><ThemeSelect/>{account.map((n,i)=><span key={i}>{action(n)}</span>)}</div></div><nav className="main-nav" aria-label="主导航">{pages.map((n,i)=><span key={i}>{action(n)}</span>)}</nav></header>;
   }
   if(node.name==='main'&&has(node,'auth')){
     const title=node.children.find(n=>n instanceof Element&&n.name==='h1') as Element;
-    return <main className="auth-layout"><section className="auth-intro"><Network aria-hidden="true"/><h1>亳州网络部<br/>在线刷题</h1><p>题库集中管理，学习进度随时接续。</p><div className="auth-features"><span><Library/>统一题库</span><span><History/>同步进度</span><span><Bookmark/>错题复习</span></div></section><Card className="auth-card"><CardHeader><CardTitle><h2>{text(title).includes('登录')?'登录学习平台':text(title)}</h2></CardTitle><CardDescription>使用个人账号登录，继续你的学习计划。</CardDescription></CardHeader><CardContent className="panel-content">{domToReact((node.children as DOMNode[]).filter(n=>n!==title),options)}</CardContent></Card></main>;
+    return <main id="main-content" tabIndex={-1} className="auth-layout"><section className="auth-intro"><Network aria-hidden="true"/><h1>亳州网络部<br/>在线刷题</h1><p>题库集中管理，学习进度随时接续。</p><div className="auth-features"><span><Library aria-hidden="true"/>统一题库</span><span><History aria-hidden="true"/>同步进度</span><span><Bookmark aria-hidden="true"/>错题复习</span></div></section><Card className="auth-card"><CardHeader><CardTitle><h2>{text(title).includes('登录')?'登录学习平台':text(title)}</h2></CardTitle><CardDescription>使用个人账号登录，继续你的学习计划。</CardDescription></CardHeader><CardContent className="panel-content">{domToReact((node.children as DOMNode[]).filter(n=>n!==title),options)}</CardContent></Card></main>;
   }
-  if(node.name==='main'){const dashboard=node.children.some(n=>n instanceof Element&&has(n,'stats'));return <main className={cn(dashboard&&'dashboard-layout')}>{children(node)}</main>;}
+  if(node.name==='main'){const dashboard=node.children.some(n=>n instanceof Element&&has(n,'stats'));return <main id="main-content" tabIndex={-1} className={cn(dashboard&&'dashboard-layout')}>{children(node)}</main>;}
   if(node.name==='form'){
     const elements=node.children as DOMNode[];
     const title=elements.find(n=>n instanceof Element&&n.name==='h2') as Element|undefined;
@@ -107,7 +108,7 @@ const options: HTMLReactParserOptions = {replace(node){
   if(node.name==='button')return action(node);
   if(node.name==='input'){
     if(node.attribs.type==='checkbox')return <Checkbox name={node.attribs.name} id={inputId(node)} defaultChecked={'checked' in node.attribs} />;
-    return <Input {...props} id={inputId(node)} />;
+    return <Input {...props} spellCheck={node.attribs.name==='username'?false:undefined} id={inputId(node)} />;
   }
   if(node.name==='textarea')return <Textarea {...props} id={inputId(node)} defaultValue={text(node)} />;
   if(node.name==='select'){
@@ -122,7 +123,7 @@ const options: HTMLReactParserOptions = {replace(node){
   }
   if(has(node,'stats'))return <div className="stats">{node.children.filter(n=>n instanceof Element).map((n,i)=><Card key={i} className="stat-card"><CardContent>{domToReact((n as Element).children as DOMNode[],options)}</CardContent></Card>)}</div>;
   if(has(node,'status'))return <Badge variant="secondary">{children(node)}</Badge>;
-  if(has(node,'feedback')||has(node,'ended'))return <Alert><CheckCircle2/><AlertTitle>{has(node,'ended')?'练习结果':'作答反馈'}</AlertTitle><AlertDescription>{children(node)}</AlertDescription></Alert>;
+  if(has(node,'feedback')||has(node,'ended'))return <Alert><CheckCircle2 aria-hidden="true"/><AlertTitle>{has(node,'ended')?'练习结果':'作答反馈'}</AlertTitle><AlertDescription>{children(node)}</AlertDescription></Alert>;
   if(has(node,'pending')||has(node,'error'))return <Alert variant={has(node,'error')?'destructive':'default'}><AlertTitle>需要处理</AlertTitle><AlertDescription>{children(node)}</AlertDescription></Alert>;
   if(node.name==='progress')return <Progress value={Number(node.attribs.value)/Number(node.attribs.max)*100} aria-label="本场练习进度"/>;
   if(node.name==='hr')return <Separator/>;
@@ -132,7 +133,7 @@ const options: HTMLReactParserOptions = {replace(node){
   if(node.name==='tr')return <TableRow>{children(node)}</TableRow>;
   if(node.name==='th')return <TableHead>{children(node)}</TableHead>;
   if(node.name==='td')return <TableCell>{children(node)}</TableCell>;
-  if(node.name==='p'&&/^(暂无|尚无|没有错题|先新建)/.test(text(node)))return <Empty><EmptyHeader><FileQuestion/><EmptyTitle>暂无内容</EmptyTitle><EmptyDescription>{children(node)}</EmptyDescription></EmptyHeader></Empty>;
+  if(node.name==='p'&&/^(暂无|尚无|没有错题|先新建)/.test(text(node)))return <Empty><EmptyHeader><FileQuestion aria-hidden="true"/><EmptyTitle>暂无内容</EmptyTitle><EmptyDescription>{children(node)}</EmptyDescription></EmptyHeader></Empty>;
 }};
 
 function paintModal(){
