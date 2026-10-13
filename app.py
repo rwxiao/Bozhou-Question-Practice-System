@@ -176,6 +176,8 @@ def login(body: dict, request: Request, response: Response):
                 fail(401, '用户名或密码错误')
         except VerificationError:
             fail(401, '用户名或密码错误')
+        if body.get('role') is not None and body['role'] != u['role']:
+            fail(403, '账号角色与所选身份不符，请切换登录身份后重试')
         issue_login(db, response, u['id'])
         return public_user(u)
 

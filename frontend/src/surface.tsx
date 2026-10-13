@@ -85,6 +85,7 @@ function panel(node: Element) {
 const options: HTMLReactParserOptions = {replace(node){
   if(!(node instanceof Element))return;
   const props=attributesToProps(node.attribs);
+  if(has(node,'login-roles'))return <ToggleGroup type="single" value={node.attribs['data-selected-role']} variant="outline" spacing={2} className="login-roles" aria-label="登录身份">{(node.children as DOMNode[]).filter(n=>n instanceof Element).map(n=>{const item=n as Element;return <ToggleGroupItem key={item.attribs['data-login-role']} value={item.attribs['data-login-role']} data-login-role={item.attribs['data-login-role']}>{children(item)}</ToggleGroupItem>;})}</ToggleGroup>;
   if(node.name==='header'){
     const nav=node.children.find(n=>n instanceof Element&&n.name==='nav') as Element;
     const navbuttons=nav.children.filter(n=>n instanceof Element&&n.name==='button') as Element[];

@@ -196,3 +196,11 @@ def test_admin_overview_is_separate_from_learner_access(system):
     summary = admin.get('/api/admin/summary')
     assert summary.status_code == 200
     assert summary.json()['learners'] == 1
+
+
+def test_login_role_choice_must_match_account(system):
+    client = TestClient(system.app)
+    client.post('/api/register', json={'username':'worker', 'password':'Worker-test-12345'})
+    assert client.post('/api/login', json={'username':'worker', 'password':'Worker-test-12345', 'role':'admin'}).status_code == 403
+    assert client.get('/api/me').status_code == 401
+    assert client.post('/api/login', json={'username':'worker', 'password':'Worker-test-12345', 'role':'user'}).status_code == 200
