@@ -219,3 +219,24 @@ def test_five_options_import_and_scoring(system):
     assert s['questions'][0]['options']['E'] == '五'
     r = admin.post(f"/api/sessions/{s['id']}/answer", json={'revision':0,'index':0,'selected':['A','E']})
     assert r.json()['answers']['0']['correct'] is True
+
+
+def test_bulk_and_all_delete_are_atomic_and_keep_history(system):
+    admin, a, b, other, bid = setup_practice(system)
+    old = a.post('/api/sessions', json={'bank_id':bid,'mode':'随机练习','amount':'全部'}).json()
+    qs = admin.get('/api/banks').json()[0]['questions']
+    url = f'/api/banks/{bid}/archive-batch'
+    assert a.post(url, json={'revision':2,'all':True}).status_code == 403
+    assert admin.post(url, json={'revision':2,'question_ids':[qs[0]['id'],'missing']}).status_code == 400
+    assert admin.get('/api/banks').json()[0]['draft'] is None
+    result = admin.post(url, json={'revision':2,'question_ids':[qs[0]['id'],qs[1]['id']]})
+    assert result.status_code == 200 and result.json()['archived'] == 2
+    assert a.get('/api/banks').json()[0]['count'] == 3
+    assert admin.post(url, json={'revision':2,'all':True}).status_code == 409
+    admin.post(f'/api/banks/{bid}/publish', json={'revision':3})
+    assert a.get('/api/banks').json()[0]['count'] == 1
+    result = admin.post(url, json={'revision':4,'all':True})
+    assert result.json()['archived'] == 1
+    admin.post(f'/api/banks/{bid}/publish', json={'revision':5})
+    assert a.get('/api/banks').json()[0]['count'] == 0
+    assert len(a.get(f"/api/sessions/{old['id']}").json()['questions']) == 3

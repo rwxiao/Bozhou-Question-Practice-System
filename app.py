@@ -459,6 +459,38 @@ def archive(bid: str, body: dict, request: Request):
         return b
 
 
+@app.post('/api/banks/{bid}/archive-batch')
+def archive_batch(bid: str, body: dict, request: Request):
+    with transaction() as db:
+        user(db, request, admin=True)
+        bank = get(db, 'bank', bid)
+        check_revision(bank, body)
+        draft = copy.deepcopy(bank['draft'] if bank['draft'] is not None else bank['questions'])
+        if body.get('all') is True:
+            if body.get('question_ids'):
+                fail(400, '全部删除不能同时指定题目')
+            ids = {q['id'] for q in draft if not q.get('archived')}
+        else:
+            selected = body.get('question_ids')
+            if not isinstance(selected, list) or not selected or len(selected) > 10000 or any(not isinstance(id, str) for id in selected):
+                fail(400, '请选择要删除的题目')
+            assert isinstance(selected, list)
+            ids = set(selected)
+            if not ids.issubset({q['id'] for q in draft}):
+                fail(400, '选择包含不存在的题目，请刷新后重试')
+        count = 0
+        for q in draft:
+            if q['id'] in ids and not q.get('archived'):
+                q['archived'] = True
+                count += 1
+        if not count:
+            fail(400, '没有可删除的题目')
+        bank['draft'] = draft
+        bank['revision'] += 1
+        put(db, 'bank', bank)
+        return {'archived': count, 'revision': bank['revision']}
+
+
 def learning_state(db, uid):
     row = db.execute("SELECT body FROM objects WHERE kind='learning' AND id=?", (uid,)).fetchone()
     return json.loads(row[0]) if row else {'id': uid, 'mistakes': {}, 'favorites': [], 'cursors': {}}

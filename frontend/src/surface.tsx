@@ -75,7 +75,7 @@ function panel(node: Element) {
   const footer=nodes.find(n=>n instanceof Element&&has(n,'actions')) as Element|undefined;
   const rest=nodes.filter(n=>n!==title&&n!==footer);
   const content=has(node,'question')?questionBody(rest):domToReact(rest,options);
-  return <Card className={cn(node.attribs.class)}>
+  return <Card key={node.attribs['data-bank-revision']} className={cn(node.attribs.class)}>
     {title?<CardHeader><CardTitle><h2>{children(title)}</h2></CardTitle>{has(node,'question')?<CardDescription>提交后查看正确答案与解析</CardDescription>:text(title)==='继续练习'?<CardDescription>进度自动保存，手机与电脑接着刷。</CardDescription>:null}</CardHeader>:null}
     <CardContent className="panel-content">{content}</CardContent>
     {footer?<><Separator/><CardFooter>{children(footer)}</CardFooter></>:null}
@@ -108,6 +108,7 @@ const options: HTMLReactParserOptions = {replace(node){
   if(has(node,'panel'))return panel(node);
   if(node.name==='button')return action(node);
   if(node.name==='input'){
+    if(node.attribs.type==='checkbox'&&(node.attribs['data-select-question']||node.attribs['data-select-all']))return <input {...props} type="checkbox" className="bulk-checkbox"/>;
     if(node.attribs.type==='checkbox')return <Checkbox name={node.attribs.name} id={inputId(node)} defaultChecked={'checked' in node.attribs} />;
     return <Input {...props} spellCheck={node.attribs.name==='username'?false:undefined} id={inputId(node)} />;
   }
