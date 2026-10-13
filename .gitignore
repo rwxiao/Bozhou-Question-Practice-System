@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+.pytest_cache/
+data/
+backups/
+.env
+.scratch/question-practice/prototype/
+*.pyc
+.mypy_cache/

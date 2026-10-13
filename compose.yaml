@@ -1,0 +1,43 @@
+name: zhixu-practice
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE: /data/practice.db
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      COOKIE_SECURE: '1'
+      PUBLIC_ORIGIN: https://${DOMAIN:?Set DOMAIN in .env}
+    volumes:
+      - database:/data
+    networks: [internal]
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ['80:80', '443:443']
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [internal]
+  backup:
+    build: .
+    restart: unless-stopped
+    command: ['python', 'ops/backup.py', 'daily']
+    environment:
+      DATABASE: /data/practice.db
+      BACKUP_DIR: /backups
+    volumes:
+      - database:/data
+      - backups:/backups
+    networks: [internal]
+volumes:
+  database:
+  backups:
+  caddy_data:
+  caddy_config:
+networks:
+  internal:
