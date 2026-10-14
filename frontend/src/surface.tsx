@@ -45,7 +45,7 @@ function ThemeSelect(){
 
 function action(node: Element) {
   const props = attributesToProps(node.attribs) as ComponentProps<'button'> & Record<string,string>;
-  const primary=has(node,'primary'), active=has(node,'active'), number=!!node.attribs['data-jump'];
+  const primary=has(node,'primary'), active=has(node,'active'), number=node.attribs['data-jump']!==undefined&&!!ancestor(node,'aside');
   const variant=primary||active||has(node,'current')?'default':ancestor(node,'nav')?'ghost':'outline';
   const actionIcon=node.attribs['data-action']==='logout'?LogOut:node.attribs['data-action']==='password'?LockKeyhole:icons[node.attribs['data-page']];
   const Icon=actionIcon;
@@ -71,12 +71,12 @@ function questionBody(nodes: DOMNode[]) {
 
 function panel(node: Element) {
   const nodes=node.children as DOMNode[];
-  const title=nodes.find(n=>n instanceof Element&&['h1','h2','h3'].includes(n.name)) as Element|undefined;
+  const title=has(node,'question')?undefined:nodes.find(n=>n instanceof Element&&['h1','h2','h3'].includes(n.name)) as Element|undefined;
   const footer=nodes.find(n=>n instanceof Element&&has(n,'actions')) as Element|undefined;
   const rest=nodes.filter(n=>n!==title&&n!==footer);
   const content=has(node,'question')?questionBody(rest):domToReact(rest,options);
-  return <Card key={node.attribs['data-bank-revision']} className={cn(node.attribs.class)}>
-    {title?<CardHeader><CardTitle><h2>{children(title)}</h2></CardTitle>{has(node,'question')?<CardDescription>提交后查看正确答案与解析</CardDescription>:text(title)==='继续练习'?<CardDescription>进度自动保存，手机与电脑接着刷。</CardDescription>:null}</CardHeader>:null}
+  return <Card key={node.attribs['data-bank-revision']} className={cn(node.attribs.class)} data-question-type={node.attribs['data-question-type']}>
+    {title?<CardHeader><CardTitle><h2>{children(title)}</h2></CardTitle>{text(title)==='继续练习'?<CardDescription>进度自动保存，手机与电脑接着刷。</CardDescription>:null}</CardHeader>:null}
     <CardContent className="panel-content">{content}</CardContent>
     {footer?<><Separator/><CardFooter>{children(footer)}</CardFooter></>:null}
   </Card>;
@@ -97,7 +97,7 @@ const options: HTMLReactParserOptions = {replace(node){
     const title=node.children.find(n=>n instanceof Element&&n.name==='h1') as Element;
     return <main id="main-content" tabIndex={-1} className="auth-layout"><section className="auth-intro"><Network aria-hidden="true"/><h1>亳州网络部<br/>在线刷题</h1><p>题库集中管理，学习进度随时接续。</p><div className="auth-features"><span><Library aria-hidden="true"/>统一题库</span><span><History aria-hidden="true"/>同步进度</span><span><Bookmark aria-hidden="true"/>错题复习</span></div></section><Card className="auth-card"><CardHeader><CardTitle><h2>{text(title)}</h2></CardTitle><CardDescription>使用个人账号登录，继续你的学习计划。</CardDescription></CardHeader><CardContent className="panel-content">{domToReact((node.children as DOMNode[]).filter(n=>n!==title),options)}</CardContent></Card></main>;
   }
-  if(node.name==='main'){const dashboard=node.children.some(n=>n instanceof Element&&has(n,'stats'));return <main id="main-content" tabIndex={-1} className={cn(dashboard&&'dashboard-layout')}>{children(node)}</main>;}
+  if(node.name==='main'){const dashboard=node.children.some(n=>n instanceof Element&&has(n,'stats'));return <main id="main-content" tabIndex={-1} className={cn(dashboard&&'dashboard-layout',node.children.some(n=>n instanceof Element&&has(n,'practice-summary'))&&'practice-layout')}>{children(node)}</main>;}
   if(node.name==='form'){
     const elements=node.children as DOMNode[];
     const title=elements.find(n=>n instanceof Element&&n.name==='h2') as Element|undefined;
@@ -125,7 +125,7 @@ const options: HTMLReactParserOptions = {replace(node){
   }
   if(has(node,'stats'))return <div className="stats">{node.children.filter(n=>n instanceof Element).map((n,i)=><Card key={i} className="stat-card"><CardContent>{domToReact((n as Element).children as DOMNode[],options)}</CardContent></Card>)}</div>;
   if(has(node,'status'))return <Badge variant="secondary">{children(node)}</Badge>;
-  if(has(node,'feedback')||has(node,'ended'))return <Alert><CheckCircle2 aria-hidden="true"/><AlertTitle>{has(node,'ended')?'练习结果':'作答反馈'}</AlertTitle><AlertDescription>{children(node)}</AlertDescription></Alert>;
+  if(has(node,'feedback')||has(node,'ended'))return <Alert className={node.attribs.class}><CheckCircle2 aria-hidden="true"/><AlertTitle>{has(node,'ended')?'练习结果':'作答反馈'}</AlertTitle><AlertDescription>{children(node)}</AlertDescription></Alert>;
   if(has(node,'pending')||has(node,'error'))return <Alert variant={has(node,'error')?'destructive':'default'}><AlertTitle>需要处理</AlertTitle><AlertDescription>{children(node)}</AlertDescription></Alert>;
   if(node.name==='progress')return <Progress value={Number(node.attribs.value)/Number(node.attribs.max)*100} aria-label="本场练习进度"/>;
   if(node.name==='hr')return <Separator/>;
