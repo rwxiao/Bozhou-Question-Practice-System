@@ -59,3 +59,12 @@ main.practice-layout{padding:0 16px 24px}.practice-layout .practice-grid{gap:18p
 .practice-layout .question [data-slot=card-footer]{margin-top:20px}.practice-layout .question [data-slot=card-footer]>.primary:hover{background:#2f66d8}.practice-layout .feedback{margin-top:18px;padding:14px 16px;font-size:15px}.answer-explanation{margin-top:10px;padding:10px 12px;border-radius:9px;background:rgba(255,255,255,.72);color:#3c4c5c;font-size:15px}.answer-explanation strong{color:#2f66d8}.practice-layout .answer-card h2{font-size:14px}.practice-layout .answer-card [data-slot=card-header]{padding-bottom:12px}.answer-legend{margin-top:8px}.practice-menu{margin:0 0 12px}
 .panel,.bank,.auth-card,.practice-config{border:1px solid #e4eaf2}.site-header{position:sticky;top:0;z-index:20;backdrop-filter:blur(8px)}.modal-content{border-radius:16px;padding:24px;max-width:640px}.question[data-question-type="判断"] .answer-options{gap:14px}.question[data-question-type="判断"] .answer-options [data-slot=toggle-group-item]{font-size:17px;line-height:1.75}.sync-label{font-size:12px}
 @media(max-width:520px){body{font-size:15px}.reference-wrap{padding:0 16px}.practice-title{font-size:16px}.question-stem{font-size:17px}.practice-layout .question [data-slot=card-footer]>button{flex:1;min-width:96px;padding:11px 10px}.practice-layout .question [data-action=finish]{flex-basis:100%}}
+.mobile-finish{display:none}
+@media(max-width:700px){
+ .practice-layout .question [data-slot=card-footer]>.desktop-finish{display:none}
+ .practice-menu .mobile-finish{display:inline-flex}
+ .practice-layout .question [data-slot=card-footer]{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+ .practice-layout .question [data-slot=card-footer]>button{width:100%;min-width:0;min-height:44px;grid-column:auto;grid-row:auto;margin:0}
+}
+.practice-layout .finish-menu{display:inline-flex}.practice-layout .question [data-slot=card-footer]{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr)}.practice-layout .question [data-slot=card-footer]>button{min-width:0!important;width:100%;min-height:44px}.practice-layout .question [data-slot=card-footer]>.primary{grid-column:auto;grid-row:auto}.practice-layout .practice-menu button{min-height:44px}
+.practice-layout .number-selected{background:#e8f1ff;color:#2f66d8;border-color:#a9c6f8}

@@ -526,6 +526,9 @@ def create_session(body: dict, request: Request):
         mode = body.get('mode', '顺序练习')
         if mode not in ('顺序练习', '随机练习', '错题练习', '收藏练习') or str(body.get('amount', '20')) not in ('10', '20', '50', '全部'):
             fail(400, '无效练习配置')
+        review_mode = body.get('review_mode', 'immediate')
+        if review_mode not in ('immediate', 'deferred'):
+            fail(400, '无效核对方式')
         state = learning_state(db, u['id'])
         category = str(body.get('category', ''))
         scope = b['id'] + '/' + category
@@ -547,7 +550,7 @@ def create_session(body: dict, request: Request):
         amount = str(body.get('amount', '20'))
         if amount != '全部':
             qs = qs[:int(amount)]
-        s = {'id': newid(), 'user_id': u['id'], 'bank_id': b['id'], 'title': b['title'], 'mode': mode, 'scope': scope, 'questions': qs, 'drafts': {}, 'answers': {}, 'index': 0, 'revision': 0, 'ended': False, 'created': time.time()}
+        s = {'id': newid(), 'user_id': u['id'], 'bank_id': b['id'], 'title': b['title'], 'mode': mode, 'review_mode': review_mode, 'scope': scope, 'questions': qs, 'drafts': {}, 'answers': {}, 'index': 0, 'revision': 0, 'ended': False, 'created': time.time()}
         put(db, 'session', s, u['id'])
         return session_view(s)
 
@@ -588,6 +591,28 @@ def save_draft(sid: str, body: dict, request: Request):
         return session_view(s)
 
 
+def record_answer(db, s, u, i, selected, state=None):
+    q = s['questions'][i]
+    correct = selected == sorted(q['answer'])
+    s['answers'][str(i)] = {'selected': selected, 'correct': correct, 'at': time.time()}
+    s['drafts'].pop(str(i), None)
+    s['index'] = i
+    s['revision'] += 1
+    shared_state = state is not None
+    if state is None:
+        state = learning_state(db, u['id'])
+    if not correct:
+        state['mistakes'][q['id']] = {'mastered': False, 'title': q['stem'], 'bank_id': s['bank_id']}
+    if s['mode'] == '顺序练习' and not shared_state:
+        # Advance only through the contiguous answered prefix; skipped questions remain reachable.
+        for n, question in enumerate(s['questions']):
+            if str(n) not in s['answers']:
+                break
+            state['cursors'][s['scope']] = question['id']
+    if not shared_state:
+        put(db, 'learning', state, u['id'])
+
+
 @app.post('/api/sessions/{sid}/answer')
 def submit_answer(sid: str, body: dict, request: Request):
     with transaction() as db:
@@ -599,24 +624,37 @@ def submit_answer(sid: str, body: dict, request: Request):
                 return session_view(s)
             fail(409, '答案已提交，不能修改')
         check_revision(s, body)
+        if s.get('review_mode') == 'deferred':
+            fail(400, '本场练习需全部选择后统一核对')
         if s['ended'] or not selected:
             fail(400, '练习已结束或尚未选择答案')
-        q = s['questions'][i]
-        correct = selected == sorted(q['answer'])
-        s['answers'][str(i)] = {'selected': selected, 'correct': correct, 'at': time.time()}
-        s['drafts'].pop(str(i), None)
-        s['index'] = i
-        s['revision'] += 1
+        record_answer(db, s, u, i, selected)
+        put(db, 'session', s, u['id'])
+        return session_view(s)
+
+
+@app.post('/api/sessions/{sid}/review')
+def review_answers(sid: str, body: dict, request: Request):
+    with transaction() as db:
+        u = user(db, request)
+        s = owned_session(db, sid, u['id'])
+        if s.get('reviewed'):
+            return session_view(s)
+        check_revision(s, body)
+        if s['ended'] or s.get('review_mode') != 'deferred':
+            fail(400, '当前练习不能统一核对')
+        selections = [selection(s, {'index': i, 'selected': s['drafts'].get(str(i), [])})[1] for i in range(len(s['questions']))]
+        if any(not selected for selected in selections):
+            fail(400, '请先选择全部题目的答案')
         state = learning_state(db, u['id'])
-        if not correct:
-            state['mistakes'][q['id']] = {'mastered': False, 'title': q['stem'], 'bank_id': s['bank_id']}
+        for i, selected in enumerate(selections):
+            record_answer(db, s, u, i, selected, state)
         if s['mode'] == '顺序练习':
-            # Advance only through the contiguous answered prefix; skipped questions remain reachable.
-            for n, question in enumerate(s['questions']):
-                if str(n) not in s['answers']:
-                    break
-                state['cursors'][s['scope']] = question['id']
+            state['cursors'][s['scope']] = s['questions'][-1]['id']
         put(db, 'learning', state, u['id'])
+        s['ended'] = True
+        s['reviewed'] = True
+        s['index'] = 0
         put(db, 'session', s, u['id'])
         return session_view(s)
 

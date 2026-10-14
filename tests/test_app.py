@@ -240,3 +240,33 @@ def test_bulk_and_all_delete_are_atomic_and_keep_history(system):
     admin.post(f'/api/banks/{bid}/publish', json={'revision':5})
     assert a.get('/api/banks').json()[0]['count'] == 0
     assert len(a.get(f"/api/sessions/{old['id']}").json()['questions']) == 3
+
+def test_deferred_review_is_atomic_private_and_idempotent(system):
+    admin, learner, other = TestClient(system.app), TestClient(system.app), TestClient(system.app)
+    login(admin)
+    for client, name in [(learner, 'learner'), (other, 'other')]:
+        client.post('/api/register', json={'username': name, 'password': 'Learn-test-12345'})
+        login(client, name, 'Learn-test-12345')
+    bid = admin.post('/api/banks', json={'title': '核对测试'}).json()['id']
+    preview = import_bank(admin, bid)
+    admin.post(f"/api/imports/{preview['id']}/commit")
+    admin.post(f'/api/banks/{bid}/publish', json={'revision': 1})
+    session = learner.post('/api/sessions', json={'bank_id': bid, 'review_mode': 'deferred'}).json()
+    url = f"/api/sessions/{session['id']}"
+    assert all('answer' not in q for q in session['questions'])
+    assert other.post(url+'/review', json={'revision': 0}).status_code == 404
+    assert learner.post(url+'/review', json={'revision': 0}).status_code == 400
+    assert learner.post(url+'/answer', json={'revision': 0, 'index': 0, 'selected': ['B']}).status_code == 400
+    for i, selected in enumerate([['B'], ['A', 'C'], ['A']]):
+        session = learner.patch(url, json={'revision': session['revision'], 'index': i, 'selected': selected}).json()
+        assert session['answers'] == {}
+        assert all('answer' not in q for q in session['questions'])
+    assert learner.post(url+'/review', json={'revision': 0}).status_code == 409
+    result = learner.post(url+'/review', json={'revision': session['revision']})
+    assert result.status_code == 200
+    result = result.json()
+    assert result['ended'] and len(result['answers']) == 3
+    assert sum(a['correct'] for a in result['answers'].values()) == 2
+    assert all('answer' in q for q in result['questions'])
+    assert learner.post(url+'/review', json={'revision': session['revision']}).json() == result
+    assert learner.get('/api/learning').json()['total'] == 3
