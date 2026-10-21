@@ -55,6 +55,13 @@ with sync_playwright() as p:
         assert page.locator('button[data-open]').count() == 0
         assert page.locator('details').inner_text().find('答案：') >= 0
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    admin.locator('button[data-directory]').filter(has_text='Review project').click()
+    admin.locator('button[data-delete-directory]').click()
+    expect(admin.locator('button[data-directory]').filter(has_text='Review project')).to_have_count(0)
+    assert not any(b['id'] == bank['id'] for b in admin.request.get(BASE + '/api/banks').json())
+    page.reload(wait_until='networkidle')
+    page.get_by_text('回看题目', exact=True).click()
+    expect(page.locator('details').filter(has_text=bank['questions'][0]['stem'])).to_be_visible()
     assert not errors, errors
     browser.close()
-    print('PASS: registration, login, directory/import forms, archive and desktop/mobile favorite review')
+    print('PASS: registration, imports, project deletion and preserved favorite review')

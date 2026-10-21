@@ -724,6 +724,68 @@ def test_favorite_without_session_remains_readable_after_archive(system):
     assert learner.post('/api/sessions', json={'bank_id': bid}).status_code == 400
 
 
+def test_delete_project_removes_all_bank_states_and_previews_only_in_project(system):
+    admin, learner, _, _, bid = setup_practice(system)
+    bank = next(b for b in admin.get('/api/banks').json() if b['id'] == bid)
+    project_id = bank['project_id']
+    draft = admin.post('/api/banks', json={'title': '未发布草稿', 'project_id': project_id}).json()
+    draft_preview = import_bank(admin, draft['id'])
+    assert admin.post('/api/imports/' + draft_preview['id'] + '/commit').status_code == 200
+    archived = admin.post('/api/banks', json={'title': '归档题库', 'project_id': project_id}).json()
+    assert admin.patch('/api/banks/' + archived['id'], json={'revision': 0, 'status': 'archived'}).status_code == 200
+    pending = [import_bank(admin, bank_id) for bank_id in [bid, draft['id'], archived['id']]]
+    untouched = assigned_bank(admin, '其他项目题库')
+    untouched_preview = import_bank(admin, untouched['id'])
+    session = learner.post('/api/sessions', json={'bank_id': bid}).json()
+    qid = session['questions'][0]['id']
+    assert learner.post('/api/favorite', json={'question_id': qid, 'value': True}).status_code == 200
+    assert learner.post('/api/sessions/' + session['id'] + '/answer', json={'revision': 0, 'index': 0, 'selected': ['A']}).status_code == 200
+    before = learner.get('/api/learning').json()
+    for confirmation in [False, 'true', 1]:
+        assert admin.request('DELETE', '/api/projects/' + project_id, json={'confirm_delete_banks': confirmation}).status_code == 409
+    assert len(admin.get('/api/banks').json()) == 4
+    assert admin.delete('/api/years/' + session['project']['year_id']).status_code == 409
+    deleted = admin.request('DELETE', '/api/projects/' + project_id, json={'confirm_delete_banks': True})
+    assert deleted.json() == {'ok': True, 'deleted_banks': 3}
+    assert admin.get('/api/banks').json() == [untouched]
+    for preview in pending:
+        assert admin.post('/api/imports/' + preview['id'] + '/commit').status_code == 404
+    assert admin.post('/api/imports/' + untouched_preview['id'] + '/commit').status_code == 200
+    after = learner.get('/api/learning').json()
+    for field in ['mistakes', 'favorites', 'records', 'total', 'correct']:
+        assert after[field] == before[field]
+    assert admin.delete('/api/years/' + session['project']['year_id']).status_code == 200
+    assert learner.get('/api/learning').json()['records'] == before['records']
+    assert admin.request('DELETE', '/api/projects/' + project_id, json={'confirm_delete_banks': True}).status_code == 404
+
+
+def test_delete_project_and_banks_preserves_personal_history(system):
+    admin, learner, _, other, bid = setup_practice(system)
+    bank = next(b for b in admin.get('/api/banks').json() if b['id'] == bid)
+    project_id = bank['project_id']
+    session = learner.post('/api/sessions', json={'bank_id': bid}).json()
+    # Another user has a favorite but no session snapshot.
+    qid = bank['questions'][0]['id']
+    assert other.post('/api/favorite', json={'question_id': qid, 'value': True}).status_code == 200
+    before = learner.get('/api/sessions').json()
+    payload = {'confirm_delete_banks': True}
+    assert learner.request('DELETE', '/api/projects/' + project_id, json=payload).status_code == 403
+    assert admin.delete('/api/projects/' + project_id).status_code == 409
+    assert admin.request('DELETE', '/api/projects/' + project_id, json=payload).status_code == 200
+    assert not any(b['id'] == bid for b in admin.get('/api/banks').json())
+    assert not any(p['id'] == project_id for p in admin.get('/api/directories').json()['projects'])
+    assert learner.get('/api/sessions').json() == before
+    assert learner.get('/api/sessions/' + session['id']).status_code == 200
+    answer = learner.post('/api/sessions/' + session['id'] + '/answer', json={'revision': 0, 'index': 0, 'selected': ['B']})
+    assert answer.status_code == 200
+    assert learner.post('/api/sessions', json={'bank_id': bid}).status_code == 404
+    records = other.get('/api/learning').json()['records']
+    assert records[0]['question'] == bank['questions'][0]
+    assert records[0]['project'] == session['project']
+    system.initialize()
+    assert other.get('/api/learning').json()['records'] == records
+
+
 @pytest.mark.parametrize('change', ['move', 'rename_project', 'rename_year'])
 def test_legacy_history_keeps_project_when_moved_before_first_read(system, change):
     import json

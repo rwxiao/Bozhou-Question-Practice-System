@@ -382,15 +382,39 @@ def rename_project(project_id: str, body: dict, request: Request):
         return project
 
 
+def delete_bank_content(db, banks):
+    bank_ids = {b['id'] for b in banks}
+    for session in items(db, 'session'):
+        if session['bank_id'] in bank_ids and 'project' not in session:
+            session['project'] = session_project(db, session)
+            put(db, 'session', session, session['user_id'])
+    # Personal records without sessions also need a durable source once banks go.
+    for state in items(db, 'learning'):
+        saved = state.setdefault('saved_records', {})
+        for bank in banks:
+            for q in bank['questions']:
+                if q['id'] in state['favorites'] or q['id'] in state['mistakes']:
+                    saved[q['id']] = {'question': q, 'session_id': None, 'index': None, 'title': bank['title'], 'project': session_project(db, {'bank_id': bank['id']})}
+        if saved:
+            put(db, 'learning', state, state['id'])
+    for preview in items(db, 'import'):
+        if preview['bank_id'] in bank_ids:
+            db.execute("DELETE FROM objects WHERE kind='import' AND id=?", (preview['id'],))
+    for bank in banks:
+        db.execute("DELETE FROM objects WHERE kind='bank' AND id=?", (bank['id'],))
+
+
 @app.delete('/api/projects/{project_id}')
-def delete_project(project_id: str, request: Request):
+def delete_project(project_id: str, request: Request, body: dict | None = None):
     with transaction() as db:
         user(db, request, admin=True)
         get(db, 'project', project_id)
-        if any(b.get('project_id') == project_id for b in items(db, 'bank')):
-            fail(409, '项目下仍有题库，只能删除空目录')
+        banks = [b for b in items(db, 'bank') if b.get('project_id') == project_id]
+        if banks and (body or {}).get('confirm_delete_banks') is not True:
+            fail(409, '项目下仍有题库，请明确确认删除项目及全部题库，个人历史记录保留')
+        delete_bank_content(db, banks)
         db.execute("DELETE FROM objects WHERE kind='project' AND id=?", (project_id,))
-        return {'ok': True}
+        return {'ok': True, 'deleted_banks': len(banks)}
 
 
 @app.get('/api/banks')
@@ -921,13 +945,17 @@ def learning(request: Request):
                     previous = records.get(q['id'])
                     if previous is None or str(i) in s['answers'] or 'answer' not in previous['question']:
                         records[q['id']] = {'question': q, 'session_id': s['id'], 'index': i, 'title': s['title'], 'project': session_project(db, s)}
+        for qid, record in state.get('saved_records', {}).items():
+            if qid not in records and (qid in state['favorites'] or qid in state['mistakes']):
+                records[qid] = record
         # Older favorites may predate any session; archived published content is
         # still readable for the owner of that personal record, never its draft.
         for bank in items(db, 'bank'):
             for q in bank['questions']:
                 if q['id'] in state['favorites'] and q['id'] not in records:
                     records[q['id']] = {'question': q, 'session_id': None, 'index': None, 'title': bank['title'], 'project': session_project(db, {'bank_id': bank['id']})}
-        return state | {'records': list(records.values()), 'total': len(submitted), 'correct': sum(a['correct'] for _, a in submitted), 'coverage': len(covered), 'available': len(active)}
+        visible_state = {key: value for key, value in state.items() if key != 'saved_records'}
+        return visible_state | {'records': list(records.values()), 'total': len(submitted), 'correct': sum(a['correct'] for _, a in submitted), 'coverage': len(covered), 'available': len(active)}
 
 
 @app.post('/api/favorite')
@@ -935,10 +963,11 @@ def favorite(body: dict, request: Request):
     with transaction() as db:
         u = user(db, request)
         qid = body.get('question_id')
+        state = learning_state(db, u['id'])
         available = any(q['id'] == qid for b in items(db, 'bank') if bank_available(b) for q in b['questions']) or any(q['id'] == qid for s in items(db, 'session', u['id']) for q in s['questions'])
+        available = available or (isinstance(qid, str) and qid in state.get('saved_records', {}))
         if not available:
             fail(404, '题目不可访问')
-        state = learning_state(db, u['id'])
         state['favorites'] = [q for q in state['favorites'] if q != qid]
         if body.get('value'):
             state['favorites'].append(qid)
