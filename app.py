@@ -317,7 +317,14 @@ def rename_project(project_id: str, body: dict, request: Request):
     with transaction() as db:
         user(db, request, admin=True)
         project = get(db, 'project', project_id)
-        project['name'] = directory_name(body)
+        if 'name' in body:
+            project['name'] = directory_name(body)
+        if 'hidden' in body:
+            if not isinstance(body['hidden'], bool):
+                fail(400, '隐藏状态需为布尔值')
+            project['hidden'] = body['hidden']
+        if not {'name', 'hidden'} & body.keys():
+            fail(400, '请提供名称或隐藏状态')
         put(db, 'project', project)
         return project
 
@@ -540,9 +547,9 @@ def edit_bank(bid: str, body: dict, request: Request):
         if 'project_id' in body:
             b['project_id'] = directory_reference(db, 'project', body['project_id'])['id']
         if 'status' in body:
-            if body['status'] != 'offline':
-                fail(400, '此入口只支持下架')
-            b['status'] = 'offline'
+            if body['status'] not in ('offline', 'archived'):
+                fail(400, '此入口只支持下架或归档')
+            b['status'] = body['status']
         b['revision'] += 1
         put(db, 'bank', b)
         return b
@@ -616,11 +623,22 @@ def session_view(s):
     return result
 
 
+def session_project(db, s):
+    if 'project' in s:
+        return s['project']
+    bank = get(db, 'bank', s['bank_id'])
+    if not bank.get('project_id'):
+        return None
+    project = get(db, 'project', bank['project_id'])
+    year = get(db, 'year', project['year_id'])
+    return {'id': project['id'], 'name': project['name'], 'year_id': year['id'], 'year_name': year['name']}
+
+
 @app.get('/api/sessions')
 def sessions(request: Request):
     with transaction() as db:
         u = user(db, request)
-        return [{k: s[k] for k in ('id', 'title', 'mode', 'ended', 'created', 'index')} | {'answered': len(s['answers']), 'count': len(s['questions']), 'correct': sum(a['correct'] for a in s['answers'].values())} for s in sorted(items(db, 'session', u['id']), key=lambda s: s['created'], reverse=True)]
+        return [{k: s[k] for k in ('id', 'title', 'mode', 'ended', 'created', 'index')} | {'project': session_project(db, s), 'answered': len(s['answers']), 'count': len(s['questions']), 'correct': sum(a['correct'] for a in s['answers'].values())} for s in sorted(items(db, 'session', u['id']), key=lambda s: s['created'], reverse=True)]
 
 
 @app.post('/api/sessions')
@@ -629,7 +647,7 @@ def create_session(body: dict, request: Request):
         u = user(db, request)
         b = get(db, 'bank', body.get('bank_id', ''))
         if b['status'] != 'published':
-            fail(400, '题库尚未发布或已下架')
+            fail(400, '题库尚未发布、已下架或已归档，不能开始新练习')
         mode = body.get('mode', '顺序练习')
         if mode not in ('顺序练习', '随机练习', '错题练习', '收藏练习') or str(body.get('amount', '20')) not in ('10', '20', '50', '全部'):
             fail(400, '无效练习配置')
@@ -658,6 +676,7 @@ def create_session(body: dict, request: Request):
         if amount != '全部':
             qs = qs[:int(amount)]
         s = {'id': newid(), 'user_id': u['id'], 'bank_id': b['id'], 'title': b['title'], 'mode': mode, 'review_mode': review_mode, 'scope': scope, 'questions': qs, 'drafts': {}, 'answers': {}, 'index': 0, 'revision': 0, 'ended': False, 'created': time.time()}
+        s['project'] = session_project(db, s)
         put(db, 'session', s, u['id'])
         return session_view(s)
 
@@ -787,7 +806,14 @@ def learning(request: Request):
         submitted = [(q, s['answers'][str(i)]) for s in items(db, 'session', u['id']) for i, q in enumerate(s['questions']) if str(i) in s['answers']]
         active = {q['id'] for b in items(db, 'bank') if b['status'] == 'published' for q in b['questions'] if not q.get('archived')}
         covered = {q['id'] for q, _ in submitted} & active
-        return state | {'total': len(submitted), 'correct': sum(a['correct'] for _, a in submitted), 'coverage': len(covered), 'available': len(active)}
+        records: dict[str, dict] = {}
+        for s in sorted(items(db, 'session', u['id']), key=lambda s: s['created']):
+            for i, q in enumerate(session_view(s)['questions']):
+                if q['id'] in state['mistakes'] or q['id'] in state['favorites']:
+                    previous = records.get(q['id'])
+                    if previous is None or str(i) in s['answers'] or 'answer' not in previous['question']:
+                        records[q['id']] = {'question': q, 'session_id': s['id'], 'index': i, 'title': s['title'], 'project': session_project(db, s)}
+        return state | {'records': list(records.values()), 'total': len(submitted), 'correct': sum(a['correct'] for _, a in submitted), 'coverage': len(covered), 'available': len(active)}
 
 
 @app.post('/api/favorite')

@@ -91,6 +91,73 @@ def setup_practice(system):
     return admin, a, b, other, bid
 
 
+def test_bank_archive_preserves_practice_and_learning(system):
+    admin, learner, _, other, bid = setup_practice(system)
+    year = admin.post('/api/years', json={'name': '2026'}).json()
+    project = admin.post('/api/projects', json={'name': '技能比赛', 'year_id': year['id']}).json()
+    bank = admin.patch(f'/api/banks/{bid}', json={'revision': 2, 'project_id': project['id']}).json()
+    session = learner.post('/api/sessions', json={'bank_id': bid}).json()
+    sid = session['id']
+    qid = session['questions'][0]['id']
+    assert learner.post('/api/favorite', json={'question_id': qid, 'value': True}).status_code == 200
+    answered = learner.post(f'/api/sessions/{sid}/answer', json={'revision': 0, 'index': 0, 'selected': ['A']}).json()
+    before = learner.get('/api/learning').json()
+    assert learner.patch(f'/api/banks/{bid}', json={'revision': bank['revision'], 'status': 'archived'}).status_code == 403
+    archived = admin.patch(f'/api/banks/{bid}', json={'revision': bank['revision'], 'status': 'archived'})
+    assert archived.status_code == 200, archived.text
+    assert archived.json()['status'] == 'archived'
+    assert archived.json()['questions'] == bank['questions']
+    assert admin.patch(f'/api/banks/{bid}', json={'revision': bank['revision'], 'status': 'archived'}).status_code == 409
+    assert learner.get('/api/banks').json() == []
+    assert learner.get('/api/learning/directories').json() == {'years': [], 'projects': []}
+    for mode in ['顺序练习', '随机练习', '错题练习', '收藏练习']:
+        response = learner.post('/api/sessions', json={'bank_id': bid, 'mode': mode, 'restart': True})
+        assert response.status_code == 400
+        assert '归档' in response.json()['detail']
+    assert len(learner.get('/api/sessions').json()) == 1
+    assert learner.get(f'/api/sessions/{sid}').json() == answered
+    continued = learner.post(f'/api/sessions/{sid}/answer', json={'revision': answered['revision'], 'index': 1, 'selected': ['A', 'C']})
+    assert continued.status_code == 200
+    finished = learner.post(f'/api/sessions/{sid}/finish', json={'revision': continued.json()['revision']}).json()
+    assert finished['ended'] and len(finished['answers']) == 2
+    history = learner.get('/api/sessions').json()[0]
+    assert history['project']['name'] == '技能比赛'
+    assert history['project']['year_name'] == '2026'
+    after = learner.get('/api/learning').json()
+    assert after['mistakes'] == before['mistakes'] and after['favorites'] == before['favorites']
+    assert after['total'] == 2 and after['correct'] == 1
+    assert after['records'][0]['question']['stem'] == '一加一？'
+    assert after['records'][0]['question']['answer'] == ['B']
+    assert after['records'][0]['project']['name'] == '技能比赛'
+    assert other.get('/api/learning').json()['records'] == []
+    assert admin.delete('/api/projects/' + project['id']).status_code == 409
+    assert admin.delete('/api/years/' + year['id']).status_code == 409
+    assert admin.delete(f'/api/banks/{bid}').status_code == 405
+
+
+def test_hidden_project_keeps_banks_and_history_available(system):
+    admin, learner, _, _, bid = setup_practice(system)
+    year = admin.post('/api/years', json={'name': '2026'}).json()
+    project = admin.post('/api/projects', json={'name': '年度考试', 'year_id': year['id']}).json()
+    admin.patch(f'/api/banks/{bid}', json={'revision': 2, 'project_id': project['id']})
+    original = learner.post('/api/sessions', json={'bank_id': bid}).json()
+    for value in ['true', 1, None]:
+        assert admin.patch('/api/projects/' + project['id'], json={'hidden': value}).status_code == 400
+    assert learner.patch('/api/projects/' + project['id'], json={'hidden': True}).status_code == 403
+    hidden = admin.patch('/api/projects/' + project['id'], json={'hidden': True})
+    assert hidden.status_code == 200, hidden.text
+    assert hidden.json() == project | {'hidden': True}
+    assert learner.get('/api/learning/directories').json()['projects'] == [project | {'hidden': True}]
+    assert len(learner.get('/api/banks').json()) == 1
+    assert learner.post('/api/sessions', json={'bank_id': bid, 'mode': '随机练习'}).status_code == 200
+    assert learner.get('/api/sessions/' + original['id']).json() == original
+    renamed = admin.patch('/api/projects/' + project['id'], json={'name': '已结束考试'}).json()
+    assert renamed['hidden'] is True
+    assert learner.get('/api/sessions').json()[1]['project']['name'] == '年度考试'
+    assert admin.delete('/api/projects/' + project['id']).status_code == 409
+    assert admin.patch('/api/projects/' + project['id'], json={'hidden': False}).json()['hidden'] is False
+
+
 def test_cross_device_draft_conflict_scoring_and_isolation(system):
     admin, a, b, other, bid = setup_practice(system)
     session = a.post('/api/sessions', json={'bank_id': bid, 'mode': '顺序练习', 'amount': '20'}).json()
