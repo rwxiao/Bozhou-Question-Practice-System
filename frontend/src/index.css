@@ -68,3 +68,24 @@ main.practice-layout{padding:0 16px 24px}.practice-layout .practice-grid{gap:18p
 }
 .practice-layout .finish-menu{display:inline-flex}.practice-layout .question [data-slot=card-footer]{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr)}.practice-layout .question [data-slot=card-footer]>button{min-width:0!important;width:100%;min-height:44px}.practice-layout .question [data-slot=card-footer]>.primary{grid-column:auto;grid-row:auto}.practice-layout .practice-menu button{min-height:44px}
 .practice-layout .number-selected{background:#e8f1ff;color:#2f66d8;border-color:#a9c6f8}
+
+/* Directory management uses a compact selector on phones and a tree on desktop. */
+.directory-workspace { display: grid; gap: 24px; min-width: 0; }
+.directory-sidebar { display: none; }
+.directory-content { min-width: 0; }
+.directory-mobile { margin-bottom: 16px; }
+.directory-mobile label { display: grid; gap: 8px; }
+.directory-mobile select { width: 100%; min-width: 0; }
+.directory-tools { flex-wrap: wrap; margin-bottom: 16px; }
+.directory-content h2 { overflow-wrap: anywhere; }
+@media (min-width: 768px) {
+  .directory-workspace { grid-template-columns: 220px minmax(0, 1fr); align-items: start; }
+  .directory-sidebar { display: block; position: sticky; top: 24px; }
+  .directory-sidebar nav, .directory-projects { display: grid; gap: 8px; }
+  .directory-sidebar h2 { margin-bottom: 16px; }
+  .directory-sidebar button { width: 100%; justify-content: flex-start; white-space: normal; height: auto; min-height: 44px; text-align: left; overflow-wrap: anywhere; }
+  .directory-sidebar button[aria-current="page"] { background: var(--primary); color: var(--primary-foreground); }
+  .directory-year { display: grid; gap: 8px; }
+  .directory-projects { padding-left: 16px; }
+  .directory-mobile { display: none; }
+}

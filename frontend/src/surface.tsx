@@ -105,13 +105,14 @@ const options: HTMLReactParserOptions = {replace(node){
   if(node.name==='input'){
     if(node.attribs.type==='checkbox'&&(node.attribs['data-select-question']||node.attribs['data-select-all']))return <input {...props} type="checkbox" className="bulk-checkbox"/>;
     if(node.attribs.type==='checkbox')return <Checkbox name={node.attribs.name} id={inputId(node)} defaultChecked={'checked' in node.attribs} />;
-    return <Input {...props} spellCheck={node.attribs.name==='username'?false:undefined} id={inputId(node)} />;
+    const {value, ...inputProps} = props;
+    return <Input {...inputProps} defaultValue={typeof value==='string'?value:undefined} spellCheck={node.attribs.name==='username'?false:undefined} id={inputId(node)} />;
   }
   if(node.name==='textarea')return <Textarea {...props} id={inputId(node)} defaultValue={text(node)} />;
   if(node.name==='select'){
     const opts=node.children.filter(n=>n instanceof Element&&n.name==='option') as Element[];
     const selected=opts.find(o=>'selected' in o.attribs)||opts[0];
-    return <NativeSelect key={opts.map(o=>o.attribs.value??text(o)).join("|")} {...props} id={inputId(node)} defaultValue={selected?.attribs.value??(selected?text(selected):'')}>{opts.map((o,i)=><option key={i} value={o.attribs.value??text(o)}>{text(o)}</option>)}</NativeSelect>;
+    return <NativeSelect key={opts.map(o=>o.attribs.value??text(o)).join("|")+(node.attribs.id==='admin-directory'?":"+selected?.attribs.value:"")} {...props} id={inputId(node)} defaultValue={selected?.attribs.value??(selected?text(selected):'')}>{opts.map((o,i)=><option key={i} value={o.attribs.value??text(o)}>{text(o)}</option>)}</NativeSelect>;
   }
   if(node.name==='label'){
     const control=node.children.find(n=>n instanceof Element&&['input','textarea','select'].includes(n.name)) as Element|undefined;

@@ -270,3 +270,80 @@ def test_deferred_review_is_atomic_private_and_idempotent(system):
     assert all('answer' in q for q in result['questions'])
     assert learner.post(url+'/review', json={'revision': session['revision']}).json() == result
     assert learner.get('/api/learning').json()['total'] == 3
+
+
+def test_directory_management_persistence_and_empty_deletion(system):
+    admin = TestClient(system.app)
+    login(admin)
+    year = admin.post('/api/years', json={'name': '2026'} )
+    assert year.status_code == 200, year.text
+    year = year.json()
+    project = admin.post('/api/projects', json={'name': '技能比赛', 'year_id': year['id']}).json()
+    bank = admin.post('/api/banks', json={'title': '安全专业', 'project_id': project['id']}).json()
+    assert bank['project_id'] == project['id']
+    second = admin.post('/api/banks', json={'title': 'AI专业', 'project_id': project['id']}).json()
+    assert second['id'] != bank['id']
+    assert admin.patch('/api/years/' + year['id'], json={'name': '2027'}).json()['name'] == '2027'
+    assert admin.patch('/api/projects/' + project['id'], json={'name': '网络比赛'}).json()['name'] == '网络比赛'
+    system.initialize()
+    assert admin.get('/api/directories').json() == {
+        'years': [{'id': year['id'], 'name': '2027'}],
+        'projects': [{'id': project['id'], 'name': '网络比赛', 'year_id': year['id']}]}
+    assert admin.delete('/api/years/' + year['id']).status_code == 409
+    assert admin.delete('/api/projects/' + project['id']).status_code == 409
+    assert admin.patch('/api/banks/' + bank['id'], json={'revision': 0, 'status': 'offline'}).status_code == 200
+    assert admin.delete('/api/projects/' + project['id']).status_code == 409
+    empty = admin.post('/api/projects', json={'name': '空项目', 'year_id': year['id']}).json()
+    assert admin.delete('/api/projects/' + empty['id']).status_code == 200
+    empty_year = admin.post('/api/years', json={'name': '2028'}).json()
+    assert admin.delete('/api/years/' + empty_year['id']).status_code == 200
+
+
+def test_directory_permissions_and_invalid_ownership(system):
+    admin, learner, _, _, bid = setup_practice(system)
+    year = admin.post('/api/years', json={'name': '2026'}).json()
+    project = admin.post('/api/projects', json={'name': '比赛', 'year_id': year['id']}).json()
+    for path, payload in [('/api/years', {'name': '2027'}),
+                          ('/api/projects', {'name': '越权', 'year_id': year['id']})]:
+        assert learner.post(path, json=payload).status_code == 403
+    assert learner.get('/api/directories').status_code == 403
+    for path in ['/api/years/' + year['id'], '/api/projects/' + project['id']]:
+        assert learner.patch(path, json={'name': '越权'}).status_code == 403
+        assert learner.delete(path).status_code == 403
+    for value in [None, '', [], {}, 123, 'missing']:
+        expected = 404 if value == 'missing' else 400
+        assert admin.post('/api/projects', json={'name': '无效', 'year_id': value}).status_code == expected
+        assert admin.post('/api/banks', json={'title': '无效', 'project_id': value}).status_code == expected
+        assert admin.patch('/api/banks/' + bid, json={'revision': 2, 'project_id': value}).status_code == expected
+    for name in ['', '   ', None, [], 'a' * 101]:
+        assert admin.post('/api/years', json={'name': name}).status_code == 400
+        assert admin.patch('/api/projects/' + project['id'], json={'name': name}).status_code == 400
+    assert learner.patch('/api/banks/' + bid, json={'revision': 2, 'project_id': project['id']}).status_code == 403
+    assert len(admin.get('/api/banks').json()) == 1
+    assert admin.get('/api/banks').json()[0].get('project_id') is None
+
+
+def test_moving_bank_preserves_questions_and_personal_records(system):
+    admin, learner, _, _, bid = setup_practice(system)
+    before = admin.get('/api/banks').json()[0]
+    session = learner.post('/api/sessions', json={'bank_id': bid, 'mode': '顺序练习', 'amount': '全部'}).json()
+    qid = session['questions'][0]['id']
+    learner.post('/api/sessions/' + session['id'] + '/answer', json={'revision': 0, 'index': 0, 'selected': ['A']})
+    learner.post('/api/favorite', json={'question_id': qid, 'value': True})
+    learning = learner.get('/api/learning').json()
+    for name in ['2026', '2027']:
+        year = admin.post('/api/years', json={'name': name}).json()
+        project = admin.post('/api/projects', json={'name': '比赛', 'year_id': year['id']}).json()
+        current = admin.get('/api/banks').json()[0]
+        moved = admin.patch('/api/banks/' + bid, json={'revision': current['revision'], 'project_id': project['id']})
+        assert moved.status_code == 200
+        assert moved.json()['id'] == bid and moved.json()['questions'] == before['questions']
+        assert moved.json()['project_id'] == project['id']
+    assert admin.patch('/api/banks/' + bid, json={'revision': 2, 'project_id': project['id']}).status_code == 409
+    system.initialize()
+    assert admin.get('/api/banks').json()[0]['project_id'] == project['id']
+    assert learner.get('/api/learning').json() == learning
+    resumed = learner.get('/api/sessions/' + session['id']).json()
+    assert resumed['answers']['0']['correct'] is False
+    assert resumed['questions'][0]['id'] == qid
+    assert learner.post('/api/sessions/' + session['id'] + '/finish', json={'revision': resumed['revision']}).status_code == 200

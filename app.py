@@ -242,6 +242,87 @@ def reset(uid: str, body: dict, request: Request):
     return {'ok': True}
 
 
+def directory_name(body):
+    name = body.get('name')
+    if not isinstance(name, str) or not 1 <= len(name.strip()) <= 100:
+        fail(400, '目录名称需为 1–100 个字符')
+    return name.strip()
+
+
+def directory_reference(db, kind, value):
+    if not isinstance(value, str) or not value:
+        fail(400, '归属标识无效')
+    return get(db, kind, value)
+
+
+@app.get('/api/directories')
+def directories(request: Request):
+    with transaction() as db:
+        user(db, request, admin=True)
+        return {'years': items(db, 'year'), 'projects': items(db, 'project')}
+
+
+@app.post('/api/years')
+def create_year(body: dict, request: Request):
+    with transaction() as db:
+        user(db, request, admin=True)
+        year = {'id': newid(), 'name': directory_name(body)}
+        put(db, 'year', year)
+        return year
+
+
+@app.patch('/api/years/{year_id}')
+def rename_year(year_id: str, body: dict, request: Request):
+    with transaction() as db:
+        user(db, request, admin=True)
+        year = get(db, 'year', year_id)
+        year['name'] = directory_name(body)
+        put(db, 'year', year)
+        return year
+
+
+@app.delete('/api/years/{year_id}')
+def delete_year(year_id: str, request: Request):
+    with transaction() as db:
+        user(db, request, admin=True)
+        get(db, 'year', year_id)
+        if any(p['year_id'] == year_id for p in items(db, 'project')):
+            fail(409, '年份下仍有项目，只能删除空目录')
+        db.execute("DELETE FROM objects WHERE kind='year' AND id=?", (year_id,))
+        return {'ok': True}
+
+
+@app.post('/api/projects')
+def create_project(body: dict, request: Request):
+    with transaction() as db:
+        user(db, request, admin=True)
+        year = directory_reference(db, 'year', body.get('year_id'))
+        project = {'id': newid(), 'name': directory_name(body), 'year_id': year['id']}
+        put(db, 'project', project)
+        return project
+
+
+@app.patch('/api/projects/{project_id}')
+def rename_project(project_id: str, body: dict, request: Request):
+    with transaction() as db:
+        user(db, request, admin=True)
+        project = get(db, 'project', project_id)
+        project['name'] = directory_name(body)
+        put(db, 'project', project)
+        return project
+
+
+@app.delete('/api/projects/{project_id}')
+def delete_project(project_id: str, request: Request):
+    with transaction() as db:
+        user(db, request, admin=True)
+        get(db, 'project', project_id)
+        if any(b.get('project_id') == project_id for b in items(db, 'bank')):
+            fail(409, '项目下仍有题库，只能删除空目录')
+        db.execute("DELETE FROM objects WHERE kind='project' AND id=?", (project_id,))
+        return {'ok': True}
+
+
 @app.get('/api/banks')
 def banks(request: Request):
     with transaction() as db:
@@ -257,6 +338,8 @@ def create_bank(body: dict, request: Request):
         if not title or len(title) > 100:
             fail(400, '题库名称需为 1–100 个字符')
         b = {'id': newid(), 'title': title, 'status': 'draft', 'revision': 0, 'questions': [], 'draft': None}
+        if 'project_id' in body:
+            b['project_id'] = directory_reference(db, 'project', body['project_id'])['id']
         put(db, 'bank', b)
         return b
 
@@ -432,6 +515,8 @@ def edit_bank(bid: str, body: dict, request: Request):
             if not title or len(title) > 100:
                 fail(400, '名称需为1–100字符')
             b['title'] = title
+        if 'project_id' in body:
+            b['project_id'] = directory_reference(db, 'project', body['project_id'])['id']
         if 'status' in body:
             if body['status'] != 'offline':
                 fail(400, '此入口只支持下架')

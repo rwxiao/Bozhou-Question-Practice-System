@@ -30,3 +30,22 @@
 
 ## 核对方式
 创建练习可传 `review_mode`：`immediate`（默认，单题提交）或 `deferred`（先保存全部选择）。`POST /api/sessions/{sid}/review` 接收 `revision`，仅在统一核对练习的所有题目已有选择时提交整场。核对在单事务内进行，重复成功请求返回已核对状态；未完成返回 400、版本冲突返回 409。统一核对前 `/answer` 不接受提交，正确答案和解析不返回。
+
+
+## 年份、备考项目与题库归属（第 01 项）
+
+以下目录接口仅管理员可用；普通用户返回 403，未登录返回 401。
+
+| 方法 | 路径 | 请求与行为 |
+| --- | --- | --- |
+| GET | /api/directories | 返回 `years`、`projects`；项目含 `year_id` |
+| POST | /api/years | `{name}` 新建年份，返回 `{id,name}` |
+| PATCH | /api/years/{id} | `{name}` 改名年份 |
+| DELETE | /api/years/{id} | 仅无项目时删除，否则 409 |
+| POST | /api/projects | `{name,year_id}` 新建备考项目 |
+| PATCH | /api/projects/{id} | `{name}` 改名备考项目 |
+| DELETE | /api/projects/{id} | 仅无任何关联题库时删除，否则 409；下架、归档状态也阻止删除 |
+
+名称须为去除两端空白后 1–100 字符的字符串。归属须为存在的年份／项目 ID；类型不合法返回 400，不存在返回 404。
+`POST /api/banks` 可传 `project_id`；`PATCH /api/banks/{id}` 可用 `{revision,project_id}` 调整归属（冲突返回 409）。年份通过项目关联推导，不接受独立的题库年份，避免年份与项目不一致。移动只改变归属和题库 revision，不改变题库 ID、题目、草稿、练习及个人记录。
+为兼容旧题库，未传 `project_id` 的旧创建方式继续可用，旧数据无需回填；新管理页面创建题库要求选择项目，未分配题库在待整理入口管理。本项不改变旧题库对学习者的可见性，迁移规则由第 05 项实施。
