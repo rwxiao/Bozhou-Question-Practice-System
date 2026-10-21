@@ -9,6 +9,7 @@
 | POST | /api/password | 验证原密码、更改密码、撤销旧登录 |
 | GET | /api/users | 管理员列出账号 |
 | POST | /api/users/{id}/reset | 管理员重置并强制改密 |
+| POST | /api/users/{id}/disable | 管理员停用普通用户、撤销其全部登录，保留个人记录；重复停用幂等 |
 | GET/POST | /api/banks | 查询可见题库 / 管理员创建 |
 | PATCH | /api/banks/{id} | 管理员修改名称或下架，带 revision |
 | GET | /api/template.csv、/api/template.xlsx | 下载管理员模板 |
@@ -26,6 +27,10 @@
 | PATCH | /api/reports/{id} | 管理员处理状态 |
 
 完整字段契约可在运行中的 /docs 查看。SQLite 事务串行化版本校验和写入；相同会话的旧版本不会静默覆盖新版本。后台资源不会向普通用户返回草稿或题库答案。管理员不是学习记录的代理身份，不能通过会话 ID 查看其他用户会话。
+
+注册请求仅需 `{username, name, password}`：用户名 3–32 位字母、数字或下划线（大小写不敏感且唯一）；姓名去除首尾空白后 1–50 字符；密码沿用 10–128 字符规则。注册无需审批，不能由请求指定管理员身份。
+
+登录、`/api/me` 和管理员用户列表返回 `id, username, nickname, role, must_change, name, created_at, disabled`，不返回密码或哈希。`created_at` 为注册时的 Unix 秒时间戳；旧账号 `name/created_at` 为 `null`，界面明确显示未知；保留旧昵称和学习记录。停用账号新登录返回 403；已有登录已撤销，访问受保护接口返回 401。即使登录记录存在，鉴权仍会检查停用状态。管理员账号不能停用，普通用户不能列出或停用账号。
 
 
 ## 核对方式

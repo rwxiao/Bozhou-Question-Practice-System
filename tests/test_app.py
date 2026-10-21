@@ -23,7 +23,7 @@ def login(client, username='admin', password='Admin-test-12345'):
 def test_register_permissions_and_password_reset(system):
     admin, user = TestClient(system.app), TestClient(system.app)
     login(admin)
-    assert user.post('/api/register', json={'username': 'learner', 'password': 'Learn-test-12345', 'nickname': '学习者'}).status_code == 200
+    assert user.post('/api/register', json={'username': 'learner', 'name': '学习者', 'password': 'Learn-test-12345', 'nickname': '学习者'}).status_code == 200
     login(user, 'learner', 'Learn-test-12345')
     assert user.post('/api/banks', json={'title': '非法题库'}).status_code == 403
     uid = user.get('/api/me').json()['id']
@@ -53,7 +53,7 @@ def import_bank(admin, bid, text=SAMPLE):
 def test_import_is_atomic_and_drafts_are_private(system):
     admin, user = TestClient(system.app), TestClient(system.app)
     login(admin)
-    user.post('/api/register', json={'username': 'learner', 'password': 'Learn-test-12345'})
+    user.post('/api/register', json={'username': 'learner', 'name': '学习者', 'password': 'Learn-test-12345'})
     login(user, 'learner', 'Learn-test-12345')
     bank = assigned_bank(admin, '基础题库')
     bad = import_bank(admin, bank['id'], SAMPLE.replace('Q2,多选', 'Q1,多选'))
@@ -85,8 +85,8 @@ def test_xlsx_template_import_and_preview_conflict(system):
 def setup_practice(system, assigned=True):
     admin, a, b, other = [TestClient(system.app) for _ in range(4)]
     login(admin)
-    a.post('/api/register', json={'username': 'learner', 'password': 'Learn-test-12345'})
-    other.post('/api/register', json={'username': 'other', 'password': 'Other-test-12345'})
+    a.post('/api/register', json={'username': 'learner', 'name': '学习者', 'password': 'Learn-test-12345'})
+    other.post('/api/register', json={'username': 'other', 'name': '其他用户', 'password': 'Other-test-12345'})
     login(a, 'learner', 'Learn-test-12345')
     login(b, 'learner', 'Learn-test-12345')
     login(other, 'other', 'Other-test-12345')
@@ -262,7 +262,7 @@ def test_update_preserves_missing_questions_and_archive_is_a_draft(system):
 def test_admin_overview_is_separate_from_learner_access(system):
     admin, learner = TestClient(system.app), TestClient(system.app)
     login(admin)
-    learner.post('/api/register', json={'username':'worker', 'password':'Worker-test-12345', 'role':'admin'})
+    learner.post('/api/register', json={'username':'worker', 'name': '工作人员', 'password':'Worker-test-12345', 'role':'admin'})
     login(learner, 'worker', 'Worker-test-12345')
     assert learner.get('/api/me').json()['role'] == 'user'
     assert learner.get('/api/admin/summary').status_code == 403
@@ -273,7 +273,7 @@ def test_admin_overview_is_separate_from_learner_access(system):
 
 def test_login_role_choice_must_match_account(system):
     client = TestClient(system.app)
-    client.post('/api/register', json={'username':'worker', 'password':'Worker-test-12345'})
+    client.post('/api/register', json={'username':'worker', 'name': '工作人员', 'password':'Worker-test-12345'})
     assert client.post('/api/login', json={'username':'worker', 'password':'Worker-test-12345', 'role':'admin'}).status_code == 403
     assert client.get('/api/me').status_code == 401
     assert client.post('/api/login', json={'username':'worker', 'password':'Worker-test-12345', 'role':'user'}).status_code == 200
@@ -318,7 +318,7 @@ def test_deferred_review_is_atomic_private_and_idempotent(system):
     admin, learner, other = TestClient(system.app), TestClient(system.app), TestClient(system.app)
     login(admin)
     for client, name in [(learner, 'learner'), (other, 'other')]:
-        client.post('/api/register', json={'username': name, 'password': 'Learn-test-12345'})
+        client.post('/api/register', json={'username': name, 'name': name, 'password': 'Learn-test-12345'})
         login(client, name, 'Learn-test-12345')
     bid = assigned_bank(admin, '核对测试')['id']
     preview = import_bank(admin, bid)

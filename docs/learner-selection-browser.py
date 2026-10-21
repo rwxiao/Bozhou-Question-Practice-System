@@ -40,7 +40,7 @@ with sync_playwright() as p:
     page.on('pageerror', lambda e: errors.append(str(e)))
     username = 'browser_' + uuid4().hex[:8]
     user = p.request.new_context(base_url=BASE)
-    assert user.post('/api/register', data={'username': username, 'password': 'Learn-test-12345'}).ok
+    assert user.post('/api/register', data={'username': username, 'name': username, 'password': 'Learn-test-12345'}).ok
     page.goto(BASE + '/learn', wait_until='networkidle')
     print('Initial controls:', page.locator('input').evaluate_all('(els)=>els.map(e=>({name:e.name,id:e.id}))'))
     page.get_by_label('用户名', exact=True).fill(username)

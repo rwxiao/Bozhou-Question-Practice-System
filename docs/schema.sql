@@ -1,7 +1,8 @@
 -- 当前 SQLite 初始结构；应用启动时以相同定义创建。
 -- objects.body 为版本化领域文档：bank/import/session/learning/report/year/project。
 -- 会话包含固定题目版本快照，用户账号与登录索引保持独立。
-CREATE TABLE users(id TEXT PRIMARY KEY, username TEXT UNIQUE, nickname TEXT, hash TEXT, role TEXT, must_change INTEGER DEFAULT 0);
+CREATE TABLE users(id TEXT PRIMARY KEY, username TEXT UNIQUE, nickname TEXT, hash TEXT, role TEXT, must_change INTEGER DEFAULT 0, name TEXT, created_at REAL, disabled INTEGER NOT NULL DEFAULT 0);
+-- 启动兼容迁移仅添加缺失列：旧账号 name/created_at 保持 NULL，不以迁移时间填充。
 CREATE TABLE logins(token TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id), expires REAL);
 CREATE TABLE objects(kind TEXT, id TEXT, owner TEXT, body TEXT NOT NULL, PRIMARY KEY(kind,id));
 CREATE TABLE audit(id INTEGER PRIMARY KEY, actor TEXT, action TEXT, target TEXT, at REAL);

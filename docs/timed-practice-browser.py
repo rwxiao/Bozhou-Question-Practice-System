@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory(prefix='timed-practice-') as folder:
                 preview = admin.post('/api/banks/' + bank['id'] + '/preview', multipart={'file': {'name': 'test.csv', 'mimeType': 'text/csv', 'buffer': SAMPLE.encode('utf-8-sig')}}).json()
                 post('/imports/' + preview['id'] + '/commit', {'publish': True})
                 username = 'timer_' + uuid4().hex[:8]
-                assert admin.post('/api/register', data={'username': username, 'password': 'Learn-test-12345'}).ok
+                assert admin.post('/api/register', data={'username': username, 'name': username, 'password': 'Learn-test-12345'}).ok
                 browser = p.chromium.launch(headless=True, channel='msedge')
                 context = browser.new_context(viewport={'width': 1440, 'height': 1000})
                 page = context.new_page()

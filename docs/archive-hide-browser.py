@@ -29,8 +29,8 @@ with sync_playwright() as p:
         banks.append(bank)
     username = 'archive_' + suffix
     user = p.request.new_context(base_url=BASE)
-    post(user, '/register', {'username': username, 'password': 'Learn-test-12345'})
-    post(user, '/login', {'username': username, 'password': 'Learn-test-12345'})
+    post(user, '/register', {'username': username, 'name': username, 'password': 'Learn-test-12345'})
+    post(user, '/login', {'username': username, 'name': username, 'password': 'Learn-test-12345'})
     session = post(user, '/sessions', {'bank_id': banks[0]['id']})
     post(user, '/favorite', {'question_id': session['questions'][0]['id'], 'value': True})
     post(user, '/sessions/' + session['id'] + '/answer', {'revision': 0, 'index': 0, 'selected': ['A']})

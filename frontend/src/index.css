@@ -92,4 +92,9 @@ main.practice-layout{padding:0 16px 24px}.practice-layout .practice-grid{gap:18p
 
 .learner-directory { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
 .learner-directory > *, .practice-config select { min-width:0; max-width:100%; }
+.users-list article > div { min-width: 0; }
+.users-list h2, .users-list dd { overflow-wrap: anywhere; }
+.users-list dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px 16px; margin-top: 12px; }
+.users-list dt { color: var(--muted-foreground); }
+.users-list dd { margin: 0; }
 @media(max-width:700px){ .learner-directory { grid-template-columns:minmax(0,1fr); } }

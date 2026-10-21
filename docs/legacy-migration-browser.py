@@ -21,8 +21,8 @@ with sync_playwright() as p:
         banks.append(bank)
     user = p.request.new_context(base_url=BASE)
     username = 'migration_' + suffix
-    assert user.post('/api/register', data={'username': username, 'password': 'Learn-test-12345'}).ok
-    assert user.post('/api/login', data={'username': username, 'password': 'Learn-test-12345'}).ok
+    assert user.post('/api/register', data={'username': username, 'name': username, 'password': 'Learn-test-12345'}).ok
+    assert user.post('/api/login', data={'username': username, 'name': username, 'password': 'Learn-test-12345'}).ok
     assert not any(b['id'] in [bank['id'] for bank in banks] for b in user.get('/api/banks').json())
     browser = p.chromium.launch(headless=True, channel='msedge')
     page = browser.new_page(viewport={'width': 1440, 'height': 1000})

@@ -59,6 +59,10 @@ def initialize():
         CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, actor TEXT, action TEXT, target TEXT, at REAL);
         CREATE TABLE IF NOT EXISTS attempts(key TEXT PRIMARY KEY, count INTEGER, start REAL);
         ''')
+        columns = {r['name'] for r in db.execute('PRAGMA table_info(users)')}
+        for name, definition in [('name', 'TEXT'), ('created_at', 'REAL'), ('disabled', 'INTEGER NOT NULL DEFAULT 0')]:
+            if name not in columns:
+                db.execute(f'ALTER TABLE users ADD COLUMN {name} {definition}')
         if not db.execute("SELECT 1 FROM users WHERE role='admin'").fetchone():
             password = os.getenv('ADMIN_PASSWORD', '')
             if password:
@@ -66,7 +70,7 @@ def initialize():
                 name = os.getenv('ADMIN_USERNAME', 'admin').lower()
                 if not re.fullmatch(r'[a-z0-9_]{3,32}', name):
                     raise ValueError('管理员用户名需为3–32位字母、数字或下划线')
-                db.execute('INSERT INTO users VALUES(?,?,?,?,?,0)', (newid(), name, '管理员', ph.hash(password), 'admin'))
+                db.execute('INSERT INTO users(id,username,nickname,hash,role,created_at) VALUES(?,?,?,?,?,?)', (newid(), name, '管理员', ph.hash(password), 'admin', time.time()))
 
 
 def newid():
@@ -103,6 +107,8 @@ def user(db, request, admin=False, allow_change=False):
     u = db.execute('SELECT users.* FROM users JOIN logins ON users.id=logins.user_id WHERE token=? AND expires>?', (token, time.time())).fetchone()
     if not u:
         fail(401, '请先登录')
+    if u['disabled']:
+        fail(403, '账号已停用，请联系管理员')
     if not allow_change and u['must_change']:
         fail(403, '请先修改临时密码')
     if admin and u['role'] != 'admin':
@@ -111,7 +117,7 @@ def user(db, request, admin=False, allow_change=False):
 
 
 def public_user(u):
-    return {k: u[k] for k in ('id', 'username', 'nickname', 'role', 'must_change')}
+    return {k: u[k] for k in ('id', 'username', 'nickname', 'role', 'must_change', 'name', 'created_at', 'disabled')}
 
 
 @app.middleware('http')
@@ -148,11 +154,14 @@ def register(body: dict, request: Request):
     if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_]{3,32}', name):
         fail(400, '用户名为 3–32 位字母、数字或下划线')
     validate_password(password)
+    real_name = body.get('name')
+    if not isinstance(real_name, str) or not 1 <= len(real_name.strip()) <= 50:
+        fail(400, '姓名需为 1–50 个字符')
     with transaction() as db:
         auth_limit(db, request)
     with transaction() as db:
         try:
-            db.execute('INSERT INTO users VALUES(?,?,?,?,?,0)', (newid(), name.lower(), str(body.get('nickname') or name)[:50], ph.hash(str(password)), 'user'))
+            db.execute('INSERT INTO users(id,username,nickname,hash,role,name,created_at) VALUES(?,?,?,?,?,?,?)', (newid(), name.lower(), real_name.strip(), ph.hash(password), 'user', real_name.strip(), time.time()))
         except sqlite3.IntegrityError:
             fail(409, '用户名已存在')
     return {'ok': True}
@@ -176,6 +185,8 @@ def login(body: dict, request: Request, response: Response):
                 fail(401, '用户名或密码错误')
         except VerificationError:
             fail(401, '用户名或密码错误')
+        if u['disabled']:
+            fail(403, '账号已停用，请联系管理员')
         if body.get('role') is not None and body['role'] != u['role']:
             fail(403, '账号角色与所选身份不符，请切换登录身份后重试')
         issue_login(db, response, u['id'])
@@ -227,6 +238,22 @@ def admin_summary(request: Request):
                 'drafts': sum(b['draft'] is not None or b['status'] == 'draft' for b in all_banks),
                 'learners': db.execute("SELECT COUNT(*) FROM users WHERE role='user'").fetchone()[0],
                 'pending_reports': sum(r['status'] == '待处理' for r in items(db, 'report'))}
+
+
+@app.post('/api/users/{uid}/disable')
+def disable_user(uid: str, request: Request):
+    with transaction() as db:
+        actor = user(db, request, admin=True)
+        target = db.execute('SELECT * FROM users WHERE id=?', (uid,)).fetchone()
+        if not target:
+            fail(404, '用户不存在')
+        if target['role'] != 'user':
+            fail(400, '只能停用普通用户账号')
+        db.execute('UPDATE users SET disabled=1 WHERE id=?', (uid,))
+        db.execute('DELETE FROM logins WHERE user_id=?', (uid,))
+        if not target['disabled']:
+            db.execute('INSERT INTO audit(actor,action,target,at) VALUES(?,?,?,?)', (actor['id'], 'disable_user', uid, time.time()))
+    return {'ok': True}
 
 
 @app.post('/api/users/{uid}/reset')
