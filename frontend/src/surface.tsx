@@ -32,7 +32,12 @@ const children = (node: Element) => domToReact(node.children as DOMNode[], optio
 function has(node: Element, name: string) { return (node.attribs.class || '').split(' ').includes(name); }
 function text(node: DOMNode): string { return node.type === 'text' ? node.data : node instanceof Element ? node.children.map(n=>text(n as DOMNode)).join('') : ''; }
 function ancestor(node: Element, name: string): Element | null { let p=node.parent; while(p){if(p instanceof Element && p.name===name)return p;p=p.parent;}return null; }
-function inputId(node: Element) { return node.attribs.id || `${ancestor(node,'form')?.attribs.id || 'control'}-${node.attribs.name || 'value'}`; }
+function inputId(node: Element) {
+  if(node.attribs.id)return node.attribs.id;
+  if(node.attribs['data-select-all'])return `select-all-${node.attribs['data-select-all']}`;
+  if(node.attribs['data-select-question'])return `select-question-${node.attribs['data-select-question']}-${node.attribs['data-qid']}`;
+  return `${ancestor(node,'form')?.attribs.id || 'control'}-${node.attribs.name || 'value'}`;
+}
 
 document.documentElement.removeAttribute('data-theme');
 document.querySelector('meta[name=theme-color]')?.setAttribute('content','#3b7df5');
@@ -103,7 +108,7 @@ const options: HTMLReactParserOptions = {replace(node){
   if(has(node,'panel'))return panel(node);
   if(node.name==='button')return action(node);
   if(node.name==='input'){
-    if(node.attribs.type==='checkbox'&&(node.attribs['data-select-question']||node.attribs['data-select-all']))return <input {...props} type="checkbox" className="bulk-checkbox"/>;
+    if(node.attribs.type==='checkbox'&&(node.attribs['data-select-question']||node.attribs['data-select-all']))return <input {...props} id={inputId(node)} type="checkbox" className="bulk-checkbox"/>;
     if(node.attribs.type==='checkbox')return <Checkbox name={node.attribs.name} id={inputId(node)} required={'required' in node.attribs} defaultChecked={'checked' in node.attribs} />;
     const {value, ...inputProps} = props;
     return <Input {...inputProps} defaultValue={typeof value==='string'?value:undefined} spellCheck={node.attribs.name==='username'?false:undefined} id={inputId(node)} />;

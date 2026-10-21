@@ -424,6 +424,19 @@ def banks(request: Request):
         return [bank_view(b, u) for b in items(db, 'bank') if u['role'] == 'admin' or bank_available(b)]
 
 
+@app.delete('/api/banks/{bid}')
+def delete_bank(bid: str, request: Request, body: dict | None = None):
+    with transaction() as db:
+        user(db, request, admin=True)
+        body = body or {}
+        if body.get('confirm') is not True:
+            fail(400, '请明确确认删除题库，个人历史记录保留')
+        bank = get(db, 'bank', bid)
+        check_revision(bank, body)
+        delete_bank_content(db, [bank])
+        return {'ok': True}
+
+
 @app.post('/api/banks')
 def create_bank(body: dict, request: Request):
     with transaction() as db:

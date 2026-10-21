@@ -138,7 +138,7 @@ def test_bank_archive_preserves_practice_and_learning(system):
     assert other.get('/api/learning').json()['records'] == []
     assert admin.delete('/api/projects/' + project['id']).status_code == 409
     assert admin.delete('/api/years/' + year['id']).status_code == 409
-    assert admin.delete(f'/api/banks/{bid}').status_code == 405
+    assert admin.delete(f'/api/banks/{bid}').status_code == 400  # Explicit confirmation is required.
 
 
 def test_hidden_project_keeps_banks_and_history_available(system):
@@ -722,6 +722,37 @@ def test_favorite_without_session_remains_readable_after_archive(system):
     assert records[0]['session_id'] is None
     assert other.get('/api/learning').json()['records'] == []
     assert learner.post('/api/sessions', json={'bank_id': bid}).status_code == 400
+
+
+@pytest.mark.parametrize('legacy', [False, True])
+def test_delete_single_bank_preserves_records(system, legacy):
+    import json
+    import sqlite3
+    admin, learner, _, other, bid = setup_practice(system)
+    session = learner.post('/api/sessions', json={'bank_id': bid}).json()
+    qid = session['questions'][0]['id']
+    assert other.post('/api/favorite', json={'question_id': qid, 'value': True}).status_code == 200
+    if legacy:
+        with sqlite3.connect(system.DATABASE) as db:
+            for kind, oid in [('bank', bid), ('session', session['id'])]:
+                obj = json.loads(db.execute('SELECT body FROM objects WHERE kind=? AND id=?', (kind, oid)).fetchone()[0])
+                obj.pop('project_id' if kind == 'bank' else 'project', None)
+                db.execute('UPDATE objects SET body=? WHERE kind=? AND id=?', (json.dumps(obj), kind, oid))
+    bank = next(b for b in admin.get('/api/banks').json() if b['id'] == bid)
+    archived = admin.patch('/api/banks/' + bid, json={'revision': bank['revision'], 'status': 'archived'}).json()
+    payload = {'confirm': True, 'revision': archived['revision']}
+    assert learner.request('DELETE', '/api/banks/' + bid, json=payload).status_code == 403
+    assert admin.request('DELETE', '/api/banks/' + bid, json={'revision': archived['revision']}).status_code == 400
+    assert admin.request('DELETE', '/api/banks/' + bid, json={'confirm': True, 'revision': -1}).status_code == 409
+    assert admin.request('DELETE', '/api/banks/' + bid, json=payload).status_code == 200
+    assert not any(b['id'] == bid for b in admin.get('/api/banks').json())
+    assert learner.get('/api/sessions').status_code == 200
+    assert learner.post('/api/sessions/' + session['id'] + '/answer', json={'revision': 0, 'index': 0, 'selected': ['B']}).status_code == 200
+    records = other.get('/api/learning').json()['records']
+    assert records[0]['question']['id'] == qid
+    assert records[0]['project'] == (None if legacy else session['project'])
+    assert learner.post('/api/sessions', json={'bank_id': bid}).status_code == 404
+    assert admin.request('DELETE', '/api/banks/' + bid, json=payload).status_code == 404
 
 
 def test_delete_project_removes_all_bank_states_and_previews_only_in_project(system):

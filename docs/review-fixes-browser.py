@@ -62,6 +62,11 @@ with sync_playwright() as p:
     page.reload(wait_until='networkidle')
     page.get_by_text('回看题目', exact=True).click()
     expect(page.locator('details').filter(has_text=bank['questions'][0]['stem'])).to_be_visible()
+    standalone = admin.request.post(BASE + '/api/banks', data={'title': 'Standalone legacy bank'}).json()
+    admin.reload(wait_until='networkidle')
+    admin.locator('button[data-delete-bank="' + standalone['id'] + '"]').click()
+    expect(admin.locator('button[data-delete-bank="' + standalone['id'] + '"]')).to_have_count(0)
+    assert not any(b['id'] == standalone['id'] for b in admin.request.get(BASE + '/api/banks').json())
     assert not errors, errors
     browser.close()
-    print('PASS: registration, imports, project deletion and preserved favorite review')
+    print('PASS: registration, imports, project deletion, standalone bank deletion and preserved favorite review')

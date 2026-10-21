@@ -1,9 +1,9 @@
 # 部门题库管理与练习流程简化：正式规格
 
-Status: open
+Status: resolved
 Triage: ready-for-agent
 Date: 2026-10-21
-Review: 依据完整访谈整理；测试边界待确认，尚未开始实施
+Review: 10 项任务已完成；后续确认和最终验证见 issues/09、issues/10 及 docs/ten-tickets-verification.md
 
 ## Problem Statement
 
