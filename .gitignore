@@ -12,3 +12,6 @@ web/build/
 frontend/*.tsbuildinfo
 
 .scratch/html-conversion/
+
+# Local deployment snapshot contains accounts and personal learning records.
+.scratch/deploy/practice-migration.db

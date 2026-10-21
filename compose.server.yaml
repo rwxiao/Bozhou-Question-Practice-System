@@ -1,0 +1,44 @@
+name: bozhou-practice
+services:
+  practice:
+    build: .
+    image: bozhou-practice:current
+    restart: unless-stopped
+    environment:
+      DATABASE: /data/practice.db
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      COOKIE_SECURE: '1'
+      PUBLIC_ORIGIN: https://${DOMAIN:?Set DOMAIN in .env}
+    volumes:
+      - database:/data
+    networks:
+      gateway:
+        aliases: [bozhou-practice]
+      internal: {}
+    healthcheck:
+      test: ['CMD', 'python', '-c', 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/", timeout=5)']
+      interval: 15s
+      timeout: 8s
+      retries: 5
+      start_period: 30s
+  backup:
+    build: .
+    image: bozhou-practice:current
+    restart: unless-stopped
+    command: ['python', 'ops/backup.py', 'daily']
+    environment:
+      DATABASE: /data/practice.db
+      BACKUP_DIR: /backups
+    volumes:
+      - database:/data
+      - backups:/backups
+    networks: [internal]
+volumes:
+  database:
+  backups:
+networks:
+  internal: {}
+  gateway:
+    external: true
+    name: ${GATEWAY_NETWORK:-network-workbench_default}
