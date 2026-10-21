@@ -13,7 +13,7 @@
 | PATCH | /api/banks/{id} | 管理员修改名称或下架，带 revision |
 | GET | /api/template.csv、/api/template.xlsx | 下载管理员模板 |
 | POST | /api/banks/{id}/preview | multipart 文件，全量校验及预览 |
-| POST | /api/imports/{id}/commit | 幂等保存草稿，校验预览版本 |
+| POST | /api/imports/{id}/commit | 校验预览版本并原子合并；可选 `{publish: true}` 直接生效，默认保存草稿，同方式重复确认幂等、改换方式返回 409 |
 | POST | /api/banks/{id}/publish | 带 revision 发布草稿 |
 | POST | /api/banks/{id}/archive | 带 revision 与 question_id 保存归档草稿 |
 | GET/POST | /api/sessions | 个人会话历史 / 发起新会话 |
@@ -59,3 +59,10 @@
 `POST /api/sessions` 继续接收一个 `bank_id`、可选 `category`（空为全部）、`mode`（顺序练习／随机练习／错题练习／收藏练习），保留原有 `amount`、`restart`、`review_mode`。空范围返回 400 且不创建会话，错题、收藏和历史按登录用户隔离。
 
 首页按年份→备考项目→题库选择；切换上级清空下级。本机按用户 ID 保存目录、题库、分类和练习方式，刷新及重新登录可恢复，失效后明确提示并等待重新选择，不自动替换题库。记忆选择属于当前浏览器；已有练习的进度继续由服务端跨设备同步。第 05 项迁移前保留“未分配年份／未分配项目”的旧题库兼容选择。
+
+
+### 导入确认（任务 03）
+
+项目内新建题库后上传模板，或选择已有题库更新。CSV 与 XLSX 共用整批校验；预览返回 `questions`、`errors`（行与字段）、`added`、`updated`。题目编号只匹配所属题库，文件缺失的旧题保留；分类允许空值。
+
+`POST /api/imports/{id}/commit` 无请求体或 `{ "publish": false }` 保存草稿，`{ "publish": true }` 合并并立即生效。两种方式均要求管理员、有效预览和一致的题库版本；合并、发布及确认标记在同一事务提交。直接生效会包含该题库已存在的未发布草稿，预览计数以当前草稿为基准；页面会在上传前提示。重复相同方式确认不再写入，改变已确认方式返回 409；草稿稍后通过题库发布接口发布。更新不改写已有会话中的题目快照或历史成绩。

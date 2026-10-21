@@ -419,3 +419,95 @@ def test_uncategorized_and_empty_bank_do_not_create_invalid_session(system):
         result = learner.post('/api/sessions', json={'bank_id': bid, 'mode': mode})
         assert result.status_code == 400 and '没有可练习题目' in result.json()['detail']
     assert learner.get('/api/sessions').json() == before
+
+
+@pytest.mark.parametrize('format', ['csv', 'xlsx'])
+def test_import_can_publish_directly_or_save_draft(system, format):
+    admin, learner, _, _, bid = setup_practice(system)
+    before = learner.post('/api/sessions', json={'bank_id': bid, 'mode': '顺序练习', 'amount': '20'}).json()
+    template = admin.get('/api/template.' + format)
+    assert template.status_code == 200
+    preview = admin.post(f'/api/banks/{bid}/preview', files={'file': ('bank.' + format, template.content)}).json()
+    assert not preview['errors']
+    assert (preview['added'], preview['updated']) == (0, 3)
+    result = admin.post(f"/api/imports/{preview['id']}/commit", json={'publish': True})
+    assert result.status_code == 200, result.text
+    bank = next(b for b in admin.get('/api/banks').json() if b['id'] == bid)
+    assert bank['status'] == 'published' and bank['draft'] is None
+    assert bank['questions'][0]['stem'] == '一加一等于？'
+    assert learner.get('/api/sessions/' + before['id']).json() == before
+    revision = bank['revision']
+    assert admin.post(f"/api/imports/{preview['id']}/commit", json={'publish': True}).status_code == 200
+    assert next(b for b in admin.get('/api/banks').json() if b['id'] == bid)['revision'] == revision
+    assert admin.post(f"/api/imports/{preview['id']}/commit", json={'publish': False}).status_code == 409
+    draft = import_bank(admin, bid, SAMPLE)
+    assert admin.post(f"/api/imports/{draft['id']}/commit", json={'publish': False}).status_code == 200
+    bank = next(b for b in admin.get('/api/banks').json() if b['id'] == bid)
+    assert bank['questions'][0]['stem'] == '一加一等于？'
+    assert bank['draft'][0]['stem'] == '一加一？'
+    assert admin.post(f'/api/banks/{bid}/publish', json={'revision': bank['revision']}).status_code == 200
+
+
+@pytest.mark.parametrize('format', ['csv', 'xlsx'])
+@pytest.mark.parametrize('publish_now', [False, True])
+def test_new_bank_import_paths_and_permissions(system, format, publish_now):
+    admin, learner, _, _, _ = setup_practice(system)
+    year = admin.post('/api/years', json={'name': '2026'}).json()
+    project = admin.post('/api/projects', json={'name': '比赛', 'year_id': year['id']}).json()
+    bank = admin.post('/api/banks', json={'title': '新题库', 'project_id': project['id']}).json()
+    template = admin.get('/api/template.' + format).content
+    path = f"/api/banks/{bank['id']}/preview"
+    assert learner.post(path, files={'file': ('bank.' + format, template)}).status_code == 403
+    preview = admin.post(path, files={'file': ('bank.' + format, template)}).json()
+    assert (preview['added'], preview['updated']) == (3, 0)
+    path = f"/api/imports/{preview['id']}/commit"
+    assert learner.post(path, json={'publish': publish_now}).status_code == 403
+    assert admin.post(path, json={'publish': publish_now}).status_code == 200
+    visible = lambda: next((b for b in learner.get('/api/banks').json() if b['id'] == bank['id']), None)
+    if not publish_now:
+        assert visible() is None
+        saved = next(b for b in admin.get('/api/banks').json() if b['id'] == bank['id'])
+        assert admin.post(f"/api/banks/{bank['id']}/publish", json={'revision': saved['revision']}).status_code == 200
+    assert visible()['count'] == 3
+    assert visible()['project_id'] == project['id']
+
+
+def test_direct_import_atomic_conflicts_retention_and_bank_isolation(system):
+    admin, learner, _, _, bid = setup_practice(system)
+    original = next(b for b in admin.get('/api/banks').json() if b['id'] == bid)
+    other = admin.post('/api/banks', json={'title': '独立题库'}).json()['id']
+    preview = import_bank(admin, other)
+    assert admin.post(f"/api/imports/{preview['id']}/commit", json={'publish': True}).status_code == 200
+    bad = import_bank(admin, bid, SAMPLE.replace('Q2,多选', 'Q1,多选'))
+    assert bad['errors'][0]['row'] == 3 and bad['errors'][0]['field'] == '编号'
+    assert admin.post(f"/api/imports/{bad['id']}/commit", json={'publish': True}).status_code == 404
+    assert next(b for b in admin.get('/api/banks').json() if b['id'] == bid) == original
+    partial = SAMPLE.splitlines()[0] + '\n' + SAMPLE.splitlines()[1].replace('一加一？', '更新题干') + '\n' + SAMPLE.splitlines()[2].replace('Q2', 'Q4') + '\n'
+    stale = import_bank(admin, bid)
+    preview = import_bank(admin, bid, partial)
+    assert (preview['added'], preview['updated']) == (1, 1)
+    assert admin.post(f"/api/imports/{preview['id']}/commit", json={'publish': True}).status_code == 200
+    updated = next(b for b in admin.get('/api/banks').json() if b['id'] == bid)
+    assert [q['code'] for q in updated['questions']] == ['Q1', 'Q2', 'Q3', 'Q4']
+    assert updated['questions'][0]['stem'] == '更新题干'
+    assert updated['questions'][0]['id'] == original['questions'][0]['id']
+    isolated = next(b for b in admin.get('/api/banks').json() if b['id'] == other)
+    assert isolated['questions'][0]['stem'] == '一加一？'
+    assert isolated['questions'][0]['id'] != updated['questions'][0]['id']
+    assert admin.post(f"/api/imports/{stale['id']}/commit", json={'publish': True}).status_code == 409
+    assert next(b for b in admin.get('/api/banks').json() if b['id'] == bid) == updated
+
+
+def test_direct_import_preserves_finished_score_and_active_answers(system):
+    admin, learner, device, _, bid = setup_practice(system)
+    session = learner.post('/api/sessions', json={'bank_id': bid, 'mode': '顺序练习', 'amount': '20'}).json()
+    answered = learner.post(f"/api/sessions/{session['id']}/answer", json={'revision': 0, 'index': 0, 'selected': ['B']}).json()
+    ended = learner.post(f"/api/sessions/{session['id']}/finish", json={'revision': answered['revision']}).json()
+    active = learner.post('/api/sessions', json={'bank_id': bid, 'mode': '顺序练习', 'amount': '20', 'restart': True}).json()
+    p = import_bank(admin, bid, SAMPLE.replace(',B,加法', ',A,加法'))
+    assert admin.post(f"/api/imports/{p['id']}/commit", json={'publish': True}).status_code == 200
+    assert device.get(f"/api/sessions/{ended['id']}").json() == ended
+    assert device.get(f"/api/sessions/{active['id']}").json() == active
+    result = learner.post(f"/api/sessions/{active['id']}/answer", json={'revision': 0, 'index': 0, 'selected': ['B']})
+    assert result.status_code == 200, result.text
+    assert result.json()['answers']['0']['correct'] is True

@@ -464,11 +464,16 @@ async def preview(bid: str, request: Request, file: UploadFile = File(...)):
 
 
 @app.post('/api/imports/{iid}/commit')
-def commit_import(iid: str, request: Request):
+def commit_import(iid: str, request: Request, body: dict | None = None):
+    publish_now = (body or {}).get("publish", False)
+    if not isinstance(publish_now, bool):
+        fail(400, "publish 必须为布尔值")
     with transaction() as db:
         user(db, request, admin=True)
         p = get(db, 'import', iid)
         if p['committed']:
+            if p.get('published', False) != publish_now:
+                fail(409, '该预览已确认，不能更改生效方式，请重新预览')
             return {'ok': True}
         b = get(db, 'bank', p['bank_id'])
         check_revision(b, p)
@@ -476,9 +481,12 @@ def commit_import(iid: str, request: Request):
         for q in p['questions']:
             base[q['code']] = q
         b['draft'] = list(base.values())
+        if publish_now:
+            publish_content(db, b)
         b['revision'] += 1
         put(db, 'bank', b)
         p['committed'] = True
+        p['published'] = publish_now
         put(db, 'import', p)
         return {'ok': True}
 
@@ -488,27 +496,31 @@ def check_revision(item, body):
         fail(409, '数据已在另一设备修改，请刷新后重试；本地选择已保留')
 
 
+def publish_content(db, b):
+    old = {q['id']: q for q in b['questions']}
+    if b['draft'] is not None:
+        for q in b['draft']:
+            previous = old.get(q['id'])
+            if previous and previous['answer'] != q['answer']:
+                for learning in items(db, 'learning'):
+                    if q['id'] in learning['mistakes']:
+                        learning['mistakes'][q['id']]['mastered'] = False
+                        put(db, 'learning', learning, learning['id'])
+            q['version'] = (previous or {}).get('version', 0) + 1
+        b['questions'] = b['draft']
+        b['draft'] = None
+    if not b['questions']:
+        fail(400, '请先导入题目')
+    b['status'] = 'published'
+
+
 @app.post('/api/banks/{bid}/publish')
 def publish(bid: str, body: dict, request: Request):
     with transaction() as db:
         user(db, request, admin=True)
         b = get(db, 'bank', bid)
         check_revision(b, body)
-        old = {q['id']: q for q in b['questions']}
-        if b['draft'] is not None:
-            for q in b['draft']:
-                previous = old.get(q['id'])
-                if previous and previous['answer'] != q['answer']:
-                    for learning in items(db, 'learning'):
-                        if q['id'] in learning['mistakes']:
-                            learning['mistakes'][q['id']]['mastered'] = False
-                            put(db, 'learning', learning, learning['id'])
-                q['version'] = (previous or {}).get('version', 0) + 1
-            b['questions'] = b['draft']
-            b['draft'] = None
-        if not b['questions']:
-            fail(400, '请先导入题目')
-        b['status'] = 'published'
+        publish_content(db, b)
         b['revision'] += 1
         put(db, 'bank', b)
         return b
