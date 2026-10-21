@@ -584,3 +584,127 @@ def test_direct_import_preserves_finished_score_and_active_answers(system):
     result = learner.post(f"/api/sessions/{active['id']}/answer", json={'revision': 0, 'index': 0, 'selected': ['B']})
     assert result.status_code == 200, result.text
     assert result.json()['answers']['0']['correct'] is True
+
+
+def test_timed_practice_deadline_and_return(system, monkeypatch):
+    _, a, b, other, bid = setup_practice(system)
+    now = [system.time.time()]
+    monkeypatch.setattr(system.time, 'time', lambda: now[0])
+    s = a.post('/api/sessions', json={'bank_id': bid, 'duration_minutes': 2}).json()
+    sid = s['id']
+    deadline = s['created'] + 120
+    assert s['deadline'] == deadline
+    assert b.get('/api/sessions/' + sid).json()['deadline'] == deadline
+    now[0] = deadline - 0.01
+    answered = a.post(f'/api/sessions/{sid}/answer', json={'revision': 0, 'index': 0, 'selected': ['B']}).json()
+    assert answered['answers']['0']['correct']
+    draft = b.patch(f'/api/sessions/{sid}', json={'revision': answered['revision'], 'index': 1, 'selected': ['A', 'C']}).json()
+    now[0] = deadline
+    late = b.post(f'/api/sessions/{sid}/answer', json={'revision': draft['revision'], 'index': 1, 'selected': ['A', 'C']})
+    assert late.status_code == 409
+    ended = a.get('/api/sessions/' + sid).json()
+    assert ended['ended'] and ended['ended_at'] == deadline
+    assert list(ended['answers']) == ['0']
+    assert ended['drafts']['1'] == ['A', 'C']
+    for client in [a, b]:
+        repeated = client.post(f'/api/sessions/{sid}/finish', json={'revision': 0}).json()
+        assert repeated['revision'] == ended['revision'] and repeated['answers'] == ended['answers']
+    assert a.get('/api/learning').json()['total'] == 1
+    assert other.get('/api/sessions/' + sid).status_code == 404
+
+
+@pytest.mark.parametrize('mode', ['顺序练习', '随机练习', '错题练习', '收藏练习'])
+def test_timed_practice_all_modes_offline_return_and_untimed(system, monkeypatch, mode):
+    _, a, b, _, bid = setup_practice(system)
+    seed = a.post('/api/sessions', json={'bank_id': bid}).json()
+    for i, q in enumerate(seed['questions']):
+        a.post('/api/favorite', json={'question_id': q['id'], 'value': True})
+        seed = a.post(f"/api/sessions/{seed['id']}/answer", json={'revision': seed['revision'], 'index': i, 'selected': ['A']}).json()
+    config = {'bank_id': bid, 'mode': mode, 'restart': True}
+    untimed = a.post('/api/sessions', json=config).json()
+    timed = a.post('/api/sessions', json=config | {'duration_minutes': 1}).json()
+    deadline = timed['deadline']
+    monkeypatch.setattr(system.time, 'time', lambda: deadline + 5)
+    # No browser or intervening requests: history must settle the deadline itself.
+    history = b.get('/api/sessions').json()
+    assert next(s for s in history if s['id'] == timed['id'])['ended']
+    assert not next(s for s in history if s['id'] == untimed['id'])['ended']
+    ended = b.get('/api/sessions/' + timed['id']).json()
+    assert ended['ended_at'] == deadline and ended['answers'] == {}
+    assert a.get('/api/sessions/' + timed['id']).json()['revision'] == ended['revision']
+    assert 'deadline' not in a.get('/api/sessions/' + untimed['id']).json()
+
+
+@pytest.mark.parametrize('duration', [0, -1, 1441, 1.5, True, '2', '', [], {}])
+def test_timed_practice_duration_validation(system, duration):
+    _, a, _, _, bid = setup_practice(system)
+    response = a.post('/api/sessions', json={'bank_id': bid, 'duration_minutes': duration})
+    assert response.status_code == 400
+    assert '整数分钟' in response.json()['detail']
+    assert a.get('/api/sessions').json() == []
+
+
+@pytest.mark.parametrize('operation', ['draft', 'answer', 'review'])
+def test_timed_practice_rejects_expired_writes_and_never_scores_drafts(system, monkeypatch, operation):
+    _, a, b, _, bid = setup_practice(system)
+    deferred = operation == 'review'
+    s = a.post('/api/sessions', json={'bank_id': bid, 'duration_minutes': 1, 'review_mode': 'deferred' if deferred else 'immediate'}).json()
+    sid = s['id']
+    for i, selected in enumerate([['B'], ['A', 'C'], ['B']]):
+        s = a.patch('/api/sessions/' + sid, json={'revision': s['revision'], 'index': i, 'selected': selected}).json()
+    monkeypatch.setattr(system.time, 'time', lambda: s['deadline'])
+    body = {'revision': s['revision'], 'index': 0, 'selected': ['B']}
+    if operation == 'draft':
+        response = b.patch('/api/sessions/' + sid, json=body)
+    else:
+        response = b.post(f'/api/sessions/{sid}/{operation}', json=body)
+    assert response.status_code == 409
+    assert response.json()['session']['ended']
+    ended = a.get('/api/sessions/' + sid).json()
+    assert ended['revision'] == s['revision'] + 1
+    assert ended['answers'] == {} and ended['drafts'] == s['drafts']
+    assert a.get('/api/learning').json()['total'] == 0
+    assert a.post(f'/api/sessions/{sid}/review', json={'revision': ended['revision']}).status_code in (400, 409)
+
+
+def test_timed_practice_two_devices_concurrent_answer_and_finish(system, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    _, a, b, _, bid = setup_practice(system)
+    s = a.post('/api/sessions', json={'bank_id': bid, 'duration_minutes': 1}).json()
+    sid = s['id']
+    now = [s['deadline'] - 1]
+    monkeypatch.setattr(system.time, 'time', lambda: now[0])
+    barrier = Barrier(2)
+    def submit(client):
+        barrier.wait()
+        return client.post(f'/api/sessions/{sid}/answer', json={'revision': 0, 'index': 0, 'selected': ['B']})
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(submit, [a, b]))
+    assert [r.status_code for r in responses] == [200, 200]
+    assert a.get('/api/learning').json()['total'] == 1
+    # At the cutoff, finishing and answering on separate devices cannot add a score.
+    now[0] = s['deadline']
+    barrier = Barrier(2)
+    def finish_or_answer(item):
+        client, action = item
+        barrier.wait()
+        return client.post(f'/api/sessions/{sid}/{action}', json={'revision': 1, 'index': 1, 'selected': ['A', 'C']})
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(finish_or_answer, [(a, 'finish'), (b, 'answer')]))
+    assert [r.status_code for r in responses] == [200, 409]
+    ended = a.get('/api/sessions/' + sid).json()
+    assert ended['ended'] and ended['revision'] == 2 and len(ended['answers']) == 1
+    assert a.get('/api/learning').json()['total'] == 1
+
+
+def test_timed_practice_manual_finish_is_final_and_null_duration_is_untimed(system, monkeypatch):
+    _, a, b, _, bid = setup_practice(system)
+    s = a.post('/api/sessions', json={'bank_id': bid, 'duration_minutes': 1440}).json()
+    sid = s['id']
+    ended = a.post(f'/api/sessions/{sid}/finish', json={'revision': 0}).json()
+    monkeypatch.setattr(system.time, 'time', lambda: s['deadline'] + 1)
+    assert b.post(f'/api/sessions/{sid}/finish', json={'revision': 0}).json()['revision'] == ended['revision']
+    assert b.post(f'/api/sessions/{sid}/answer', json={'revision': 1, 'index': 0, 'selected': ['B']}).status_code == 409
+    untimed = a.post('/api/sessions', json={'bank_id': bid, 'duration_minutes': None}).json()
+    assert not untimed['ended'] and 'deadline' not in untimed

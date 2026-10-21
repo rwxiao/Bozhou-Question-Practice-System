@@ -619,11 +619,30 @@ def owned_session(db, sid, uid):
     s = get(db, 'session', sid)
     if s['user_id'] != uid:
         fail(404, '练习不存在')
+    expire_session(db, s)
     return s
+
+
+def expire_session(db, s):
+    deadline = s.get('deadline')
+    if not s['ended'] and deadline is not None and time.time() >= deadline:
+        s['ended'] = True
+        s['ended_at'] = deadline
+        s['revision'] += 1
+        put(db, 'session', s, s['user_id'])
+
+
+def timed_session_closed(s):
+    if s.get('deadline') is not None and s['ended']:
+        # Return normally so transaction() commits automatic expiration even on rejection.
+        return JSONResponse({'detail': '限时练习已结束，未提交题目不计分', 'session': session_view(s)}, status_code=409)
+    return None
 
 
 def session_view(s):
     result = dict(s)
+    if s.get('deadline') is not None:
+        result['server_now'] = time.time()
     result['questions'] = [{k: v for k, v in q.items() if k not in ('answer', 'explanation') or str(i) in s['answers']} for i, q in enumerate(s['questions'])]
     return result
 
@@ -643,7 +662,10 @@ def session_project(db, s):
 def sessions(request: Request):
     with transaction() as db:
         u = user(db, request)
-        return [{k: s[k] for k in ('id', 'title', 'mode', 'ended', 'created', 'index')} | {'project': session_project(db, s), 'answered': len(s['answers']), 'count': len(s['questions']), 'correct': sum(a['correct'] for a in s['answers'].values())} for s in sorted(items(db, 'session', u['id']), key=lambda s: s['created'], reverse=True)]
+        rows = sorted(items(db, 'session', u['id']), key=lambda s: s['created'], reverse=True)
+        for s in rows:
+            expire_session(db, s)
+        return [{k: s[k] for k in ('id', 'title', 'mode', 'ended', 'created', 'index')} | {'project': session_project(db, s), 'answered': len(s['answers']), 'count': len(s['questions']), 'correct': sum(a['correct'] for a in s['answers'].values())} for s in rows]
 
 
 @app.post('/api/sessions')
@@ -659,6 +681,9 @@ def create_session(body: dict, request: Request):
         review_mode = body.get('review_mode', 'immediate')
         if review_mode not in ('immediate', 'deferred'):
             fail(400, '无效核对方式')
+        duration = body.get('duration_minutes')
+        if duration is not None and (type(duration) is not int or not 1 <= duration <= 1440):
+            fail(400, '练习时长需为 1–1440 的整数分钟；不限时请留空')
         state = learning_state(db, u['id'])
         category = str(body.get('category', ''))
         scope = b['id'] + '/' + category
@@ -681,6 +706,8 @@ def create_session(body: dict, request: Request):
         if amount != '全部':
             qs = qs[:int(amount)]
         s = {'id': newid(), 'user_id': u['id'], 'bank_id': b['id'], 'title': b['title'], 'mode': mode, 'review_mode': review_mode, 'scope': scope, 'questions': qs, 'drafts': {}, 'answers': {}, 'index': 0, 'revision': 0, 'ended': False, 'created': time.time()}
+        if duration is not None:
+            s['deadline'] = s['created'] + duration * 60
         s['project'] = session_project(db, s)
         put(db, 'session', s, u['id'])
         return session_view(s)
@@ -710,6 +737,9 @@ def save_draft(sid: str, body: dict, request: Request):
     with transaction() as db:
         u = user(db, request)
         s = owned_session(db, sid, u['id'])
+        closed = timed_session_closed(s)
+        if closed is not None:
+            return closed
         check_revision(s, body)
         if s['ended']:
             fail(400, '练习已结束')
@@ -749,6 +779,9 @@ def submit_answer(sid: str, body: dict, request: Request):
     with transaction() as db:
         u = user(db, request)
         s = owned_session(db, sid, u['id'])
+        closed = timed_session_closed(s)
+        if closed is not None:
+            return closed
         i, selected = selection(s, body)
         if str(i) in s['answers']:
             if s['answers'][str(i)]['selected'] == selected:
@@ -769,6 +802,9 @@ def review_answers(sid: str, body: dict, request: Request):
     with transaction() as db:
         u = user(db, request)
         s = owned_session(db, sid, u['id'])
+        closed = timed_session_closed(s)
+        if closed is not None:
+            return closed
         if s.get('reviewed'):
             return session_view(s)
         check_revision(s, body)

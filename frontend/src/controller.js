@@ -4,6 +4,8 @@ import { appSurface, dialogSurface, notify } from './surface';
 const app = appSurface, dialog = dialogSurface;
 let me = null, banks = [], sessions = [], learning = null, session = null, preview = null;
 let actionBusy = false;
+let sessionClock = null, timerRefreshing = false, lastTimerRefresh = 0;
+let timedPractice = false, practiceMinutes = '30';
 let adminStats = null, directories = {years: [], projects: []}, adminDirectory = 'all', showHiddenProjects = false;
 let loginRole = location.pathname==='/admin'?'admin':'user';
 const defaultPage = () => me?.role==='admin'?'admin':'home';
@@ -22,6 +24,9 @@ async function api(path, method='GET', data=null) {
   let response;
   try {response=await fetch('/api'+path,options);}catch{throw new Error('网络连接失败，选择已在本机保留；联网后重试');}
   const result=await response.json();
+  const clockSession=result.session||result;
+  if(clockSession.deadline!=null&&clockSession.server_now!=null)sessionClock={id:clockSession.id,remaining:(clockSession.deadline-clockSession.server_now)*1000,received:performance.now()};
+  if(!response.ok&&result.session&&session&&result.session.id===session.id){session=result.session;clearLocal();sync='练习已结束';render();}
   if(!response.ok){const error=new Error(typeof result.detail==='string'?result.detail:'请求无效，请检查输入');error.status=response.status;throw error;}
   return result;
 }
@@ -66,20 +71,23 @@ function config(){
     <div class="row">${categories.length?`<label>知识分类<select name="category" id="learner-category"><option value="">全部知识分类</option>${categories.map(c=>`<option value="${esc(c)}" ${c===selectedCategory?'selected':''}>${esc(c)}</option>`).join('')}</select></label>`:''}
     <label>练习方式<select name="mode" id="learner-mode">${['顺序练习','随机练习','错题练习','收藏练习'].map(m=>`<option ${m===selectedMode?'selected':''}>${m}</option>`).join('')}</select></label>
     <label>核对答案<select name="review_mode"><option value="immediate">每题提交后立即核对</option><option value="deferred">全部答完统一核对</option></select></label>
+    <label>限时设置<select id="timed-practice"><option value="off" ${timedPractice?'':'selected'}>不限时</option><option value="on" ${timedPractice?'selected':''}>限时练习</option></select></label>
+    <label>练习分钟数<input id="practice-minutes" name="duration_minutes" type="number" min="1" max="1440" step="1" value="${esc(practiceMinutes)}" aria-describedby="duration-help" ${timedPractice?'required':'disabled'}></label>
+    <p id="duration-help" class="muted">限时可填 1–1440 整数分钟。离开仍计时；到时结束，未提交题目算未答。</p>
     <label>题量<select name="amount">${['10','20','50','全部'].map(a=>`<option ${a==='20'?'selected':''}>${a}</option>`).join('')}</select></label></div>
     <label><span><input style="width:auto" type="checkbox" name="restart"> 顺序练习从头开始</span></label>
     <p id="start-error" role="alert"></p><button class="primary" ${bank?.count?'':'disabled'}>开始练习</button></form>`;
 }
 function practice(){
-  const q=session.questions[session.index],a=session.answers[String(session.index)],pending=localDraft();
+  const q=session.questions[session.index],a=session.answers[String(session.index)],pending=session.ended?null:localDraft();
   const chosen=pending?.index===session.index?pending.selected:a?.selected||session.drafts[String(session.index)]||[];
   const deferred=session.review_mode==='deferred';
   const selectedCount=Object.values(session.drafts).filter(x=>x.length).length;
   const answered=Object.keys(session.answers).length,correct=Object.values(session.answers).filter(x=>x.correct).length,total=session.questions.length;
-  return `<div class="practice-summary"><div class="topbar-row"><div class="practice-title">亳州网络部在线刷题<span class="sub">共 <b>${total}</b> 题</span></div><div class="practice-metrics"><span>${deferred&&!session.ended?'已选':'进度'} <b>${deferred&&!session.ended?selectedCount:answered}/${total}</b></span><span>答对 <b>${correct}/${answered}</b></span><span>正确率 <b>${answered?Math.round(correct/answered*100)+'%':'--'}</b></span><span class="sync-label">${esc(sync)} · ${deferred?'统一核对':'立即核对'}</span></div></div><progress value="${deferred&&!session.ended?selectedCount:answered}" max="${total}"></progress></div>
+  return `<div class="practice-summary"><div class="topbar-row"><div class="practice-title">亳州网络部在线刷题<span class="sub">共 <b>${total}</b> 题</span></div><div class="practice-metrics">${session.deadline!=null?`<span role="timer" aria-label="练习剩余时间" id="practice-countdown">${countdownText()}</span>`:''}<span>${deferred&&!session.ended?'已选':'进度'} <b>${deferred&&!session.ended?selectedCount:answered}/${total}</b></span><span>答对 <b>${correct}/${answered}</b></span><span>正确率 <b>${answered?Math.round(correct/answered*100)+'%':'--'}</b></span><span class="sync-label">${esc(sync)} · ${deferred?'统一核对':'立即核对'}</span></div></div><progress value="${deferred&&!session.ended?selectedCount:answered}" max="${total}"></progress></div>
   ${pending?`<div class="pending">本机有未同步选择。${esc(pending.selected.join('、')||'未选')}<div class="row"><button data-action="retry">重试保存</button><button data-action="refreshSession">读取服务器最新进度</button><button data-action="discard">放弃本机选择</button></div></div>`:''}
   <div class="practice-grid"><section class="question panel" data-question-type="${esc(q.type)}">
-  ${session.ended?`<div class="ended"><h2>本次练习已结束</h2><p>已答 ${answered}/${total} 题，正确 ${correct} 题。未提交题目不计分。</p></div>`:''}
+  ${session.ended?`<div class="ended"><h2>本次练习已结束</h2><p>已答 ${answered}/${total} 题，正确 ${correct} 题，未答 ${total-answered} 题。未提交题目不计分。</p></div>`:''}
   <div class="question-meta"><div><span class="question-type" data-type="${esc(q.type)}">${esc(q.type)}</span><span class="muted">第 ${session.index+1} 题 / ${total}</span></div><button data-action="favorite">${learning.favorites.includes(q.id)?'★ 已收藏':'☆ 收藏题目'}</button></div>
   <p class="question-category muted">${esc(session.title)} · ${esc(q.category||'未分类')}</p><h2 class="question-stem">${esc(q.stem)}</h2>
   ${Object.entries(q.options).map(([key,text])=>`<button class="option ${chosen.includes(key)?'selected':''} ${a&&q.answer.includes(key)?'correct':''} ${a&&chosen.includes(key)&&!q.answer.includes(key)?'wrong':''}" data-option="${key}" aria-pressed="${chosen.includes(key)}" ${a||session.ended||busy?'disabled':''}><span class="letter">${key}</span><span class="option-text">${esc(text)}</span></button>`).join('')}
@@ -94,7 +102,7 @@ function render(){if(!me||me.must_change){auth();return;}roleEntry();if(!rolePag
 
 function modal(content){dialog.innerHTML=content;dialog.showModal();}
 function formModal(title,fields,id){modal(`<h2>${title}</h2><form class="form" id="${id}">${fields}<div class="dialog-actions"><button class="primary">确认</button><button type="button" data-action="close">取消</button></div></form>`);}
-async function openSession(id){session=await api('/sessions/'+id);sync='已同步';msg('');page='practice';history.replaceState(null,'','#practice');render();}
+async function openSession(id){session=await api('/sessions/'+id);if(session.ended)clearLocal();sync='已同步';msg('');page='practice';history.replaceState(null,'','#practice');render();}
 async function writeDraft(d){saveLocal(d);busy=true;sync='正在同步';render();try{session=await api('/sessions/'+session.id,'PATCH',d);clearLocal();sync='已同步';msg('');}catch(e){sync=e.status===409?'进度冲突':'未同步';msg(e.message,true);}finally{busy=false;render();}}
 async function displayAdminList(kind){const rows=await api('/'+kind);app.innerHTML=header()+`<main><h1>${kind==='users'?'用户管理':'纠错反馈'}</h1><section class="panel">${rows.map(r=>kind==='users'?`<div class="session-row"><div>${esc(r.username)} / ${esc(r.nickname)}<p class="muted">${r.role==='admin'?'管理员':'学习者'}</p></div><button data-reset="${r.id}">重置密码</button></div>`:`<div class="session-row"><div><strong>${esc(r.type)}</strong><p>${esc(r.question.stem)}</p><p>${esc(r.text)}</p><span>${esc(r.status)}</span></div>${me.role==='admin'?`<div class="row"><button data-resolve="${r.id}" data-status="已处理">标记已处理</button><button data-resolve="${r.id}" data-status="不采纳">不采纳</button></div>`:''}</div>`).join('')||'<p>暂无记录。</p>'}</section></main>`;}
 async function navigate(p){page=rolePages().includes(p)?p:defaultPage();location.hash=page;await load();render();if(['users','reports'].includes(page))await displayAdminList(page);}
@@ -104,6 +112,8 @@ document.addEventListener('change',event=>{const target=event.target;if(target.d
 document.addEventListener('change',e=>{if(e.target.id==='admin-directory'){adminDirectory=e.target.value;render();}});
 document.addEventListener('change',e=>{
   const id=e.target.id,value=e.target.value;
+  if(id==='timed-practice'){timedPractice=value==='on';const input=document.querySelector('#practice-minutes');input.disabled=!timedPractice;input.required=timedPractice;return;}
+  if(id==='practice-minutes'){practiceMinutes=value;return;}
   if(!['learner-year','learner-project','bank','learner-category','learner-mode'].includes(id))return;
   selectionNotice='';msg('');
   const startError=document.querySelector('#start-error');if(startError)startError.textContent='';
@@ -118,10 +128,33 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
 function openImport(bid){preview=null;formModal('更新题库',`<p>更新「${esc(banks.find(x=>x.id===bid).title)}」：按编号新增或修改，缺失旧题保留。</p>${banks.find(x=>x.id===bid).draft?'<p class="muted">此题库有未发布草稿；本次将与草稿合并，直接生效会一并发布已有草稿。</p>':''}<label>CSV / XLSX 文件<input name="file" type="file" accept=".csv,.xlsx" required></label>`,'import:'+bid);}
 function csvCell(text){return '"'+String(text||'').replaceAll('"','""')+'"';}
 function showPreview(p){preview=p;modal(`<h2>导入预览</h2>${p.errors.length?`<div class="error">${p.errors.map(e=>`<p>第 ${e.row} 行 · ${esc(e.field)}：${esc(e.message)}</p>`).join('')}</div>`:`<p>校验通过：文件共 ${p.questions.length} 题，新增 ${p.added} 题，修改 ${p.updated} 题。</p><div class="scroll"><table class="table"><tr><th>编号</th><th>题型</th><th>题干</th><th>答案</th></tr>${p.questions.slice(0,10).map(q=>`<tr><td>${esc(q.code)}</td><td>${esc(q.type)}</td><td>${esc(q.stem)}</td><td>${esc(q.answer.join('|'))}</td></tr>`).join('')}</table></div><p class="muted">预览前10题。全部校验通过，缺少的旧题保留。</p><div class="row"><button class="primary" data-action="publishImport">确认导入并生效</button><button data-action="commitImport">保存草稿</button></div>`}<button data-action="close">关闭</button>`);}
-document.addEventListener('submit',async e=>{e.preventDefault();const form=e.target,body=Object.fromEntries(new FormData(form)),button=e.submitter||form.querySelector('button[type="submit"],button:not([type])');button.disabled=true;try{if(form.id==='auth'){if(me){await api('/password','POST',body);clearUserDrafts();me=await api('/me');}else if(registerMode){await api('/register','POST',body);registerMode=false;auth();msg('注册成功，请登录');return;}else {me=await api('/login','POST',body);showHiddenProjects=false;}await load();page=defaultPage();render();}else if(form.id==='start'){body.restart=!!body.restart;saveSelection();session=await api('/sessions','POST',body);page='practice';history.replaceState(null,'','#practice');sync='已同步';render();}else if(form.id.startsWith('batchDelete:')){const result=await api('/banks/'+form.id.split(':')[1]+'/archive-batch','POST',{revision:Number(body.revision),...(body.all==='true'?{all:true}:{question_ids:JSON.parse(body.ids)})});dialog.close();await navigate('admin');msg(`已删除 ${result.archived} 题并保存为草稿，请确认发布后生效`);}else if(form.id==='newYear'||form.id==='newProject'){const kind=form.id==='newYear'?'years':'projects';const item=await api('/'+kind,'POST',body);adminDirectory=kind==='years'?'year:'+item.id:item.id;dialog.close();await navigate('admin');}else if(form.id.startsWith('directoryRename:')){const [,kind,id]=form.id.split(':');await api('/'+kind+'/'+id,'PATCH',body);dialog.close();await navigate('admin');}else if(form.id.startsWith('moveBank:')){await api('/banks/'+form.id.split(':')[1],'PATCH',{project_id:body.project_id,revision:Number(body.revision)});adminDirectory=body.project_id;dialog.close();await navigate('admin');msg('题库已移动，学习记录保留');}else if(form.id==='newBank'){const upload=new FormData(form),bank=await api('/banks','POST',{title:body.title,project_id:body.project_id});adminDirectory=body.project_id;banks.push(bank);render();openImport(bank.id);const p=await api('/banks/'+bank.id+'/preview','POST',upload);dialog.close();showPreview(p);}else if(form.id==='password'){await api('/password','POST',body);clearUserDrafts();dialog.close();me=await api('/me');await navigate(defaultPage());}else if(form.id==='report'){await api('/reports','POST',{...body,session_id:session.id,index:session.index});dialog.close();msg('反馈已提交');}else if(form.id.startsWith('import:')){const p=await api('/banks/'+form.id.split(':')[1]+'/preview','POST',new FormData(form));dialog.close();showPreview(p);}else if(form.id.startsWith('edit:')){const header=['编号','题型','题干','A','B','C','D','E','答案','解析','分类','标签'];const text=header.join(',')+'\n'+header.map(k=>csvCell(body[k])).join(',');const f=new FormData();f.append('file',new Blob(['\uFEFF'+text],{type:'text/csv'}),'edit.csv');const p=await api('/banks/'+form.id.split(':')[1]+'/preview','POST',f);dialog.close();showPreview(p);}else if(form.id.startsWith('rename:')){const bank=banks.find(b=>b.id===form.id.split(':')[1]);await api('/banks/'+bank.id,'PATCH',{...body,revision:bank.revision});dialog.close();await navigate('admin');}else if(form.id.startsWith('reset:')){await api('/users/'+form.id.split(':')[1]+'/reset','POST',body);dialog.close();msg('密码已重置；请通过可信方式告知本人');}}catch(error){msg(error.message,true);if(form.id==='start'){form.querySelector('#start-error').textContent=error.message;}}finally{button.disabled=false;}});
+document.addEventListener('submit',async e=>{e.preventDefault();const form=e.target,body=Object.fromEntries(new FormData(form)),button=e.submitter||form.querySelector('button[type="submit"],button:not([type])');button.disabled=true;try{if(form.id==='auth'){if(me){await api('/password','POST',body);clearUserDrafts();me=await api('/me');}else if(registerMode){await api('/register','POST',body);registerMode=false;auth();msg('注册成功，请登录');return;}else {me=await api('/login','POST',body);showHiddenProjects=false;}await load();page=defaultPage();render();}else if(form.id==='start'){body.restart=!!body.restart;if(timedPractice){body.duration_minutes=Number(body.duration_minutes);if(!Number.isInteger(body.duration_minutes)||body.duration_minutes<1||body.duration_minutes>1440)throw new Error('练习时长需为 1–1440 的整数分钟');}else delete body.duration_minutes;saveSelection();session=await api('/sessions','POST',body);page='practice';history.replaceState(null,'','#practice');sync='已同步';render();}else if(form.id.startsWith('batchDelete:')){const result=await api('/banks/'+form.id.split(':')[1]+'/archive-batch','POST',{revision:Number(body.revision),...(body.all==='true'?{all:true}:{question_ids:JSON.parse(body.ids)})});dialog.close();await navigate('admin');msg(`已删除 ${result.archived} 题并保存为草稿，请确认发布后生效`);}else if(form.id==='newYear'||form.id==='newProject'){const kind=form.id==='newYear'?'years':'projects';const item=await api('/'+kind,'POST',body);adminDirectory=kind==='years'?'year:'+item.id:item.id;dialog.close();await navigate('admin');}else if(form.id.startsWith('directoryRename:')){const [,kind,id]=form.id.split(':');await api('/'+kind+'/'+id,'PATCH',body);dialog.close();await navigate('admin');}else if(form.id.startsWith('moveBank:')){await api('/banks/'+form.id.split(':')[1],'PATCH',{project_id:body.project_id,revision:Number(body.revision)});adminDirectory=body.project_id;dialog.close();await navigate('admin');msg('题库已移动，学习记录保留');}else if(form.id==='newBank'){const upload=new FormData(form),bank=await api('/banks','POST',{title:body.title,project_id:body.project_id});adminDirectory=body.project_id;banks.push(bank);render();openImport(bank.id);const p=await api('/banks/'+bank.id+'/preview','POST',upload);dialog.close();showPreview(p);}else if(form.id==='password'){await api('/password','POST',body);clearUserDrafts();dialog.close();me=await api('/me');await navigate(defaultPage());}else if(form.id==='report'){await api('/reports','POST',{...body,session_id:session.id,index:session.index});dialog.close();msg('反馈已提交');}else if(form.id.startsWith('import:')){const p=await api('/banks/'+form.id.split(':')[1]+'/preview','POST',new FormData(form));dialog.close();showPreview(p);}else if(form.id.startsWith('edit:')){const header=['编号','题型','题干','A','B','C','D','E','答案','解析','分类','标签'];const text=header.join(',')+'\n'+header.map(k=>csvCell(body[k])).join(',');const f=new FormData();f.append('file',new Blob(['\uFEFF'+text],{type:'text/csv'}),'edit.csv');const p=await api('/banks/'+form.id.split(':')[1]+'/preview','POST',f);dialog.close();showPreview(p);}else if(form.id.startsWith('rename:')){const bank=banks.find(b=>b.id===form.id.split(':')[1]);await api('/banks/'+bank.id,'PATCH',{...body,revision:bank.revision});dialog.close();await navigate('admin');}else if(form.id.startsWith('reset:')){await api('/users/'+form.id.split(':')[1]+'/reset','POST',body);dialog.close();msg('密码已重置；请通过可信方式告知本人');}}catch(error){msg(error.message,true);if(form.id==='start'){form.querySelector('#start-error').textContent=error.message;}}finally{button.disabled=false;}});
 window.addEventListener('online',()=>{if(page==='practice'){sync='网络已恢复，请重试未同步操作';render();}});
 window.addEventListener('offline',()=>{if(page==='practice'){sync='离线，未同步';render();}});
 async function boot(){try{me=await api('/me');if(me.must_change){auth();return;}await load();page=defaultPage();const requested=location.hash.slice(1);if(rolePages().includes(requested)&&requested!=='practice')page=requested;render();if(['users','reports'].includes(page))await displayAdminList(page);}catch{me=null;auth();}}
 boot();
 
 document.addEventListener('change',e=>{if(e.target.matches('input[type="file"][name="file"]')&&e.target.files.length){e.target.form.requestSubmit();}});
+
+
+function countdownText(){
+  if(session.ended)return '练习已结束';
+  const seconds=Math.max(0,Math.ceil((sessionClock?.id===session.id?sessionClock.remaining-(performance.now()-sessionClock.received):0)/1000));
+  return `剩余 ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;
+}
+async function updatePracticeTimer(force=false){
+  if(!me||page!=='practice'||!session||session.ended||session.deadline==null)return;
+  const label=document.querySelector('#practice-countdown');if(label)label.textContent=countdownText();
+  if(timerRefreshing||actionBusy||busy||(!force&&performance.now()-lastTimerRefresh<3000))return;
+  timerRefreshing=true;lastTimerRefresh=performance.now();const id=session.id;
+  try{
+    const latest=await api('/sessions/'+id);
+    if(page!=='practice'||session?.id!==id||latest.revision<session.revision||actionBusy||busy)return;
+    if(latest.ended){session=latest;clearLocal();sync='练习已结束';learning=await api('/learning');render();}
+    else if(latest.revision>session.revision){session=latest;render();}
+  }catch(error){if(label)label.textContent=countdownText()+'（连接后确认结果）';}
+  finally{timerRefreshing=false;}
+}
+setInterval(()=>updatePracticeTimer(),250);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)updatePracticeTimer(true);});
+window.addEventListener('online',()=>updatePracticeTimer(true));
