@@ -38,6 +38,12 @@ def test_register_permissions_and_password_reset(system):
 SAMPLE = '编号,题型,题干,A,B,C,D,答案,解析,分类,标签\nQ1,单选,一加一？,一,二,三,,B,加法,基础,数学\nQ2,多选,偶数？,二,三,四,,A|C,偶数,基础,数学\nQ3,判断,地球是平的？,,,,,错误,地球,地理,常识\n'
 
 
+def assigned_bank(admin, title):
+    year = admin.post('/api/years', json={'name': '练习年份'}).json()
+    project = admin.post('/api/projects', json={'name': '练习项目', 'year_id': year['id']}).json()
+    return admin.post('/api/banks', json={'title': title, 'project_id': project['id']}).json()
+
+
 def import_bank(admin, bid, text=SAMPLE):
     p = admin.post(f'/api/banks/{bid}/preview', files={'file': ('bank.csv', text.encode('utf-8-sig'), 'text/csv')})
     assert p.status_code == 200, p.text
@@ -49,7 +55,7 @@ def test_import_is_atomic_and_drafts_are_private(system):
     login(admin)
     user.post('/api/register', json={'username': 'learner', 'password': 'Learn-test-12345'})
     login(user, 'learner', 'Learn-test-12345')
-    bank = admin.post('/api/banks', json={'title': '基础题库'}).json()
+    bank = assigned_bank(admin, '基础题库')
     bad = import_bank(admin, bank['id'], SAMPLE.replace('Q2,多选', 'Q1,多选'))
     assert bad['errors'][0]['row'] == 3
     assert admin.get('/api/banks').json()[0]['draft'] is None
@@ -76,7 +82,7 @@ def test_xlsx_template_import_and_preview_conflict(system):
     assert admin.post(f"/api/imports/{p['id']}/commit").status_code == 409
 
 
-def setup_practice(system):
+def setup_practice(system, assigned=True):
     admin, a, b, other = [TestClient(system.app) for _ in range(4)]
     login(admin)
     a.post('/api/register', json={'username': 'learner', 'password': 'Learn-test-12345'})
@@ -84,7 +90,7 @@ def setup_practice(system):
     login(a, 'learner', 'Learn-test-12345')
     login(b, 'learner', 'Learn-test-12345')
     login(other, 'other', 'Other-test-12345')
-    bid = admin.post('/api/banks', json={'title': '基础'}).json()['id']
+    bid = (assigned_bank(admin, '基础') if assigned else admin.post('/api/banks', json={'title': '基础'}).json())['id']
     p = import_bank(admin, bid)
     admin.post(f"/api/imports/{p['id']}/commit")
     admin.post(f'/api/banks/{bid}/publish', json={'revision': 1})
@@ -276,7 +282,7 @@ def test_login_role_choice_must_match_account(system):
 def test_five_options_import_and_scoring(system):
     admin = TestClient(system.app)
     login(admin)
-    bid = admin.post('/api/banks', json={'title':'五选项题库'}).json()['id']
+    bid = assigned_bank(admin, '五选项题库')['id']
     text = '编号,题型,题干,A,B,C,D,E,答案,解析,分类,标签\nF1,多选,选五项中的两项,一,二,三,四,五,A|E,解析,基础,测试\n'
     p = import_bank(admin, bid, text)
     assert p['errors'] == []
@@ -314,7 +320,7 @@ def test_deferred_review_is_atomic_private_and_idempotent(system):
     for client, name in [(learner, 'learner'), (other, 'other')]:
         client.post('/api/register', json={'username': name, 'password': 'Learn-test-12345'})
         login(client, name, 'Learn-test-12345')
-    bid = admin.post('/api/banks', json={'title': '核对测试'}).json()['id']
+    bid = assigned_bank(admin, '核对测试')['id']
     preview = import_bank(admin, bid)
     admin.post(f"/api/imports/{preview['id']}/commit")
     admin.post(f'/api/banks/{bid}/publish', json={'revision': 1})
@@ -367,7 +373,7 @@ def test_directory_management_persistence_and_empty_deletion(system):
 
 
 def test_directory_permissions_and_invalid_ownership(system):
-    admin, learner, _, _, bid = setup_practice(system)
+    admin, learner, _, _, bid = setup_practice(system, assigned=False)
     year = admin.post('/api/years', json={'name': '2026'}).json()
     project = admin.post('/api/projects', json={'name': '比赛', 'year_id': year['id']}).json()
     for path, payload in [('/api/years', {'name': '2027'}),
@@ -417,7 +423,7 @@ def test_moving_bank_preserves_questions_and_personal_records(system):
 
 
 def test_learner_directory_filters_and_bank_categories(system):
-    admin, learner, _, _, legacy = setup_practice(system)
+    admin, learner, _, _, legacy = setup_practice(system, assigned=False)
     assert TestClient(system.app).get('/api/learning/directories').status_code == 401
     year = admin.post('/api/years', json={'name': '2026'}).json()
     project = admin.post('/api/projects', json={'name': '能力考试', 'year_id': year['id']}).json()
@@ -431,7 +437,7 @@ def test_learner_directory_filters_and_bank_categories(system):
     visible = {b['id']: b for b in learner.get('/api/banks').json()}
     assert visible[bank['id']]['project_id'] == project['id']
     assert visible[bank['id']]['categories'] == ['地理', '安全']
-    assert visible[legacy]['project_id'] is None
+    assert legacy not in visible
     assert 'questions' not in visible[bank['id']]
     moved_year = admin.post('/api/years', json={'name': '2027'}).json()
     moved_project = admin.post('/api/projects', json={'name': '比赛', 'year_id': moved_year['id']}).json()
@@ -441,7 +447,7 @@ def test_learner_directory_filters_and_bank_categories(system):
 
 def test_learner_modes_category_scope_and_personal_records(system):
     admin, learner, device, other, first = setup_practice(system)
-    second = admin.post('/api/banks', json={'title': '同名分类另一题库'}).json()['id']
+    second = assigned_bank(admin, '同名分类另一题库')['id']
     p = import_bank(admin, second)
     admin.post(f"/api/imports/{p['id']}/commit")
     admin.post(f'/api/banks/{second}/publish', json={'revision': 1})

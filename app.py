@@ -266,7 +266,7 @@ def directories(request: Request):
 def learning_directories(request: Request):
     with transaction() as db:
         user(db, request)
-        project_ids = {b.get('project_id') for b in items(db, 'bank') if b['status'] == 'published'}
+        project_ids = {b.get('project_id') for b in items(db, 'bank') if bank_available(b)}
         projects = [p for p in items(db, 'project') if p['id'] in project_ids]
         year_ids = {p['year_id'] for p in projects}
         return {'years': [y for y in items(db, 'year') if y['id'] in year_ids], 'projects': projects}
@@ -344,7 +344,7 @@ def delete_project(project_id: str, request: Request):
 def banks(request: Request):
     with transaction() as db:
         u = user(db, request)
-        return [bank_view(b, u) for b in items(db, 'bank') if u['role'] == 'admin' or b['status'] == 'published']
+        return [bank_view(b, u) for b in items(db, 'bank') if u['role'] == 'admin' or bank_available(b)]
 
 
 @app.post('/api/banks')
@@ -359,6 +359,11 @@ def create_bank(body: dict, request: Request):
             b['project_id'] = directory_reference(db, 'project', body['project_id'])['id']
         put(db, 'bank', b)
         return b
+
+
+def bank_available(bank):
+    # Missing ownership is the legacy pending area; never infer it from titles.
+    return bank['status'] == 'published' and bool(bank.get('project_id'))
 
 
 def bank_view(b, u):
@@ -646,8 +651,8 @@ def create_session(body: dict, request: Request):
     with transaction() as db:
         u = user(db, request)
         b = get(db, 'bank', body.get('bank_id', ''))
-        if b['status'] != 'published':
-            fail(400, '题库尚未发布、已下架或已归档，不能开始新练习')
+        if not bank_available(b):
+            fail(400, '题库待整理、尚未发布、已下架或已归档，不能开始新练习')
         mode = body.get('mode', '顺序练习')
         if mode not in ('顺序练习', '随机练习', '错题练习', '收藏练习') or str(body.get('amount', '20')) not in ('10', '20', '50', '全部'):
             fail(400, '无效练习配置')
@@ -804,7 +809,7 @@ def learning(request: Request):
         u = user(db, request)
         state = learning_state(db, u['id'])
         submitted = [(q, s['answers'][str(i)]) for s in items(db, 'session', u['id']) for i, q in enumerate(s['questions']) if str(i) in s['answers']]
-        active = {q['id'] for b in items(db, 'bank') if b['status'] == 'published' for q in b['questions'] if not q.get('archived')}
+        active = {q['id'] for b in items(db, 'bank') if bank_available(b) for q in b['questions'] if not q.get('archived')}
         covered = {q['id'] for q, _ in submitted} & active
         records: dict[str, dict] = {}
         for s in sorted(items(db, 'session', u['id']), key=lambda s: s['created']):
@@ -821,7 +826,7 @@ def favorite(body: dict, request: Request):
     with transaction() as db:
         u = user(db, request)
         qid = body.get('question_id')
-        available = any(q['id'] == qid for b in items(db, 'bank') if b['status'] == 'published' for q in b['questions']) or any(q['id'] == qid for s in items(db, 'session', u['id']) for q in s['questions'])
+        available = any(q['id'] == qid for b in items(db, 'bank') if bank_available(b) for q in b['questions']) or any(q['id'] == qid for s in items(db, 'session', u['id']) for q in s['questions'])
         if not available:
             fail(404, '题目不可访问')
         state = learning_state(db, u['id'])
