@@ -347,3 +347,75 @@ def test_moving_bank_preserves_questions_and_personal_records(system):
     assert resumed['answers']['0']['correct'] is False
     assert resumed['questions'][0]['id'] == qid
     assert learner.post('/api/sessions/' + session['id'] + '/finish', json={'revision': resumed['revision']}).status_code == 200
+
+
+def test_learner_directory_filters_and_bank_categories(system):
+    admin, learner, _, _, legacy = setup_practice(system)
+    assert TestClient(system.app).get('/api/learning/directories').status_code == 401
+    year = admin.post('/api/years', json={'name': '2026'}).json()
+    project = admin.post('/api/projects', json={'name': '能力考试', 'year_id': year['id']}).json()
+    private = admin.post('/api/projects', json={'name': '未发布项目', 'year_id': year['id']}).json()
+    admin.post('/api/banks', json={'title': '私有草稿', 'project_id': private['id']})
+    bank = admin.post('/api/banks', json={'title': '安全', 'project_id': project['id']}).json()
+    preview = import_bank(admin, bank['id'], SAMPLE.replace('基础', '安全'))
+    assert admin.post(f"/api/imports/{preview['id']}/commit").status_code == 200
+    assert admin.post(f"/api/banks/{bank['id']}/publish", json={'revision': 1}).status_code == 200
+    assert learner.get('/api/learning/directories').json() == {'years': [year], 'projects': [project]}
+    visible = {b['id']: b for b in learner.get('/api/banks').json()}
+    assert visible[bank['id']]['project_id'] == project['id']
+    assert visible[bank['id']]['categories'] == ['地理', '安全']
+    assert visible[legacy]['project_id'] is None
+    assert 'questions' not in visible[bank['id']]
+    moved_year = admin.post('/api/years', json={'name': '2027'}).json()
+    moved_project = admin.post('/api/projects', json={'name': '比赛', 'year_id': moved_year['id']}).json()
+    assert admin.patch(f"/api/banks/{bank['id']}", json={'revision': 2, 'project_id': moved_project['id']}).status_code == 200
+    assert learner.get('/api/learning/directories').json() == {'years': [moved_year], 'projects': [moved_project]}
+
+
+def test_learner_modes_category_scope_and_personal_records(system):
+    admin, learner, device, other, first = setup_practice(system)
+    second = admin.post('/api/banks', json={'title': '同名分类另一题库'}).json()['id']
+    p = import_bank(admin, second)
+    admin.post(f"/api/imports/{p['id']}/commit")
+    admin.post(f'/api/banks/{second}/publish', json={'revision': 1})
+    for bid in [first, second]:
+        for mode in ['顺序练习', '随机练习']:
+            s = learner.post('/api/sessions', json={'bank_id': bid, 'category': '基础', 'mode': mode, 'amount': '全部'}).json()
+            assert len(s['questions']) == 2
+            assert all(q['id'].startswith(bid + ':') and q['category'] == '基础' for q in s['questions'])
+    s = learner.post('/api/sessions', json={'bank_id': first, 'amount': '全部'}).json()
+    sid, qid = s['id'], s['questions'][0]['id']
+    assert learner.post(f'/api/sessions/{sid}/answer', json={'revision': 0, 'index': 0, 'selected': ['A']}).status_code == 200
+    assert learner.post('/api/favorite', json={'question_id': qid, 'value': True}).status_code == 200
+    for mode in ['错题练习', '收藏练习']:
+        result = learner.post('/api/sessions', json={'bank_id': first, 'category': '基础', 'mode': mode}).json()
+        assert [q['id'] for q in result['questions']] == [qid]
+        for client, bid, category in [(other, first, '基础'), (learner, second, '基础'), (learner, first, '地理')]:
+            before = client.get('/api/sessions').json()
+            assert client.post('/api/sessions', json={'bank_id': bid, 'category': category, 'mode': mode}).status_code == 400
+            assert client.get('/api/sessions').json() == before
+    assert device.get(f'/api/sessions/{sid}').json()['answers']['0']['correct'] is False
+    assert other.get(f'/api/sessions/{sid}').status_code == 404
+    assert other.get('/api/learning').json()['favorites'] == []
+    assert other.get('/api/learning').json()['mistakes'] == {}
+    before = learner.get('/api/sessions').json()
+    assert learner.post('/api/sessions', json={'bank_id': first, 'category': '不存在'}).status_code == 400
+    assert learner.get('/api/sessions').json() == before
+
+
+def test_uncategorized_and_empty_bank_do_not_create_invalid_session(system):
+    admin, learner, _, _, bid = setup_practice(system)
+    p = import_bank(admin, bid, SAMPLE.replace('基础', '').replace('地理', ''))
+    admin.post(f"/api/imports/{p['id']}/commit")
+    admin.post(f'/api/banks/{bid}/publish', json={'revision': 3})
+    assert learner.get('/api/banks').json()[0]['categories'] == []
+    assert len(learner.post('/api/sessions', json={'bank_id': bid, 'amount': '全部'}).json()['questions']) == 3
+    bank = admin.get('/api/banks').json()[0]
+    assert admin.post(f'/api/banks/{bid}/archive-batch', json={'revision': bank['revision'], 'all': True}).status_code == 200
+    assert admin.post(f'/api/banks/{bid}/publish', json={'revision': bank['revision'] + 1}).status_code == 200
+    assert learner.get('/api/banks').json()[0]['count'] == 0
+    before = learner.get('/api/sessions').json()
+    for mode in ['顺序练习', '随机练习', '错题练习', '收藏练习']:
+        result = learner.post('/api/sessions', json={'bank_id': bid, 'mode': mode})
+        assert result.status_code == 400 and '没有可练习题目' in result.json()['detail']
+    assert learner.get('/api/sessions').json() == before

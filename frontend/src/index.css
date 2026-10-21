@@ -89,3 +89,7 @@ main.practice-layout{padding:0 16px 24px}.practice-layout .practice-grid{gap:18p
   .directory-projects { padding-left: 16px; }
   .directory-mobile { display: none; }
 }
+
+.learner-directory { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+.learner-directory > *, .practice-config select { min-width:0; max-width:100%; }
+@media(max-width:700px){ .learner-directory { grid-template-columns:minmax(0,1fr); } }

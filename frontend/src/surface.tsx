@@ -112,7 +112,7 @@ const options: HTMLReactParserOptions = {replace(node){
   if(node.name==='select'){
     const opts=node.children.filter(n=>n instanceof Element&&n.name==='option') as Element[];
     const selected=opts.find(o=>'selected' in o.attribs)||opts[0];
-    return <NativeSelect key={opts.map(o=>o.attribs.value??text(o)).join("|")+(node.attribs.id==='admin-directory'?":"+selected?.attribs.value:"")} {...props} id={inputId(node)} defaultValue={selected?.attribs.value??(selected?text(selected):'')}>{opts.map((o,i)=><option key={i} value={o.attribs.value??text(o)}>{text(o)}</option>)}</NativeSelect>;
+    return <NativeSelect key={opts.map(o=>o.attribs.value??text(o)).join("|")+(":"+(selected?.attribs.value??(selected?text(selected):'')))} {...props} id={inputId(node)} defaultValue={selected?.attribs.value??(selected?text(selected):'')}>{opts.map((o,i)=><option key={i} value={o.attribs.value??text(o)}>{text(o)}</option>)}</NativeSelect>;
   }
   if(node.name==='label'){
     const control=node.children.find(n=>n instanceof Element&&['input','textarea','select'].includes(n.name)) as Element|undefined;

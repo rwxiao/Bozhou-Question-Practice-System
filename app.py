@@ -262,6 +262,16 @@ def directories(request: Request):
         return {'years': items(db, 'year'), 'projects': items(db, 'project')}
 
 
+@app.get('/api/learning/directories')
+def learning_directories(request: Request):
+    with transaction() as db:
+        user(db, request)
+        project_ids = {b.get('project_id') for b in items(db, 'bank') if b['status'] == 'published'}
+        projects = [p for p in items(db, 'project') if p['id'] in project_ids]
+        year_ids = {p['year_id'] for p in projects}
+        return {'years': [y for y in items(db, 'year') if y['id'] in year_ids], 'projects': projects}
+
+
 @app.post('/api/years')
 def create_year(body: dict, request: Request):
     with transaction() as db:
@@ -348,7 +358,7 @@ def bank_view(b, u):
     if u['role'] == 'admin':
         return b
     active = [q for q in b['questions'] if not q.get('archived')]
-    return {k: b[k] for k in ('id', 'title', 'status', 'revision')} | {'count': len(active), 'categories': sorted({q['category'] for q in active if q['category']})}
+    return {k: b[k] for k in ('id', 'title', 'status', 'revision')} | {'project_id': b.get('project_id'), 'count': len(active), 'categories': sorted({q['category'] for q in active if q['category']})}
 
 
 HEADERS = ['编号', '题型', '题干', 'A', 'B', 'C', 'D', 'E', '答案', '解析', '分类', '标签']
