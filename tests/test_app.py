@@ -708,3 +708,42 @@ def test_timed_practice_manual_finish_is_final_and_null_duration_is_untimed(syst
     assert b.post(f'/api/sessions/{sid}/answer', json={'revision': 1, 'index': 0, 'selected': ['B']}).status_code == 409
     untimed = a.post('/api/sessions', json={'bank_id': bid, 'duration_minutes': None}).json()
     assert not untimed['ended'] and 'deadline' not in untimed
+
+
+def test_favorite_without_session_remains_readable_after_archive(system):
+    admin, learner, _, other, bid = setup_practice(system)
+    bank = next(b for b in admin.get('/api/banks').json() if b['id'] == bid)
+    question = bank['questions'][0]
+    assert learner.post('/api/favorite', json={'question_id': question['id'], 'value': True}).status_code == 200
+    assert admin.patch('/api/banks/' + bid, json={'revision': bank['revision'], 'status': 'archived'}).status_code == 200
+    records = learner.get('/api/learning').json()['records']
+    assert len(records) == 1
+    assert records[0]['question'] == question
+    assert records[0]['session_id'] is None
+    assert other.get('/api/learning').json()['records'] == []
+    assert learner.post('/api/sessions', json={'bank_id': bid}).status_code == 400
+
+
+@pytest.mark.parametrize('change', ['move', 'rename_project', 'rename_year'])
+def test_legacy_history_keeps_project_when_moved_before_first_read(system, change):
+    import json
+    import sqlite3
+    admin, learner, _, _, bid = setup_practice(system)
+    session = learner.post('/api/sessions', json={'bank_id': bid}).json()
+    original = session['project']
+    with sqlite3.connect(system.DATABASE) as db:
+        session.pop('project')
+        db.execute("UPDATE objects SET body=? WHERE kind='session' AND id=?", (json.dumps(session), session['id']))
+    year = admin.post('/api/years', json={'name': '2030'}).json()
+    project = admin.post('/api/projects', json={'name': 'Moved project', 'year_id': year['id']}).json()
+    bank = next(b for b in admin.get('/api/banks').json() if b['id'] == bid)
+    if change == 'move':
+        result = admin.patch('/api/banks/' + bid, json={'revision': bank['revision'], 'project_id': project['id']})
+    elif change == 'rename_project':
+        result = admin.patch('/api/projects/' + original['id'], json={'name': 'Renamed project'})
+    else:
+        result = admin.patch('/api/years/' + original['year_id'], json={'name': 'Renamed year'})
+    assert result.status_code == 200
+    assert learner.get('/api/sessions').json()[0]['project'] == original
+    system.initialize()
+    assert learner.get('/api/sessions').json()[0]['project'] == original

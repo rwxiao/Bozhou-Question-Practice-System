@@ -13,6 +13,7 @@ import time
 import zipfile
 from contextlib import contextmanager, asynccontextmanager
 from pathlib import Path
+from typing import NoReturn
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
@@ -77,7 +78,7 @@ def newid():
     return secrets.token_hex(16)
 
 
-def fail(code, message):
+def fail(code, message) -> NoReturn:
     raise HTTPException(code, message)
 
 
@@ -161,7 +162,7 @@ def register(body: dict, request: Request):
         auth_limit(db, request)
     with transaction() as db:
         try:
-            db.execute('INSERT INTO users(id,username,nickname,hash,role,name,created_at) VALUES(?,?,?,?,?,?,?)', (newid(), name.lower(), real_name.strip(), ph.hash(password), 'user', real_name.strip(), time.time()))
+            db.execute('INSERT INTO users(id,username,nickname,hash,role,name,created_at) VALUES(?,?,?,?,?,?,?)', (newid(), name.lower(), real_name.strip(), ph.hash(str(password)), 'user', real_name.strip(), time.time()))
         except sqlite3.IntegrityError:
             fail(409, '用户名已存在')
     return {'ok': True}
@@ -335,6 +336,7 @@ def create_year(body: dict, request: Request):
 def rename_year(year_id: str, body: dict, request: Request):
     with transaction() as db:
         user(db, request, admin=True)
+        snapshot_legacy_projects(db)
         year = get(db, 'year', year_id)
         year['name'] = directory_name(body)
         put(db, 'year', year)
@@ -366,6 +368,7 @@ def create_project(body: dict, request: Request):
 def rename_project(project_id: str, body: dict, request: Request):
     with transaction() as db:
         user(db, request, admin=True)
+        snapshot_legacy_projects(db)
         project = get(db, 'project', project_id)
         if 'name' in body:
             project['name'] = directory_name(body)
@@ -594,6 +597,8 @@ def edit_bank(bid: str, body: dict, request: Request):
         user(db, request, admin=True)
         b = get(db, 'bank', bid)
         check_revision(b, body)
+        if 'project_id' in body:
+            snapshot_legacy_projects(db, bid)
         if 'title' in body:
             title = str(body['title']).strip()
             if not title or len(title) > 100:
@@ -607,6 +612,8 @@ def edit_bank(bid: str, body: dict, request: Request):
             b['status'] = body['status']
         b['revision'] += 1
         put(db, 'bank', b)
+        if 'project_id' in body:
+            snapshot_legacy_projects(db, bid)
         return b
 
 
@@ -706,6 +713,16 @@ def session_project(db, s):
     project = get(db, 'project', bank['project_id'])
     year = get(db, 'year', project['year_id'])
     return {'id': project['id'], 'name': project['name'], 'year_id': year['id'], 'year_name': year['name']}
+
+
+def snapshot_legacy_projects(db, bank_id=None):
+    # Freeze old history before directory edits, or when its bank is first assigned.
+    for s in items(db, 'session'):
+        if 'project' not in s and (bank_id is None or s['bank_id'] == bank_id):
+            project = session_project(db, s)
+            if project is not None:
+                s['project'] = project
+                put(db, 'session', s, s['user_id'])
 
 
 @app.get('/api/sessions')
@@ -904,6 +921,12 @@ def learning(request: Request):
                     previous = records.get(q['id'])
                     if previous is None or str(i) in s['answers'] or 'answer' not in previous['question']:
                         records[q['id']] = {'question': q, 'session_id': s['id'], 'index': i, 'title': s['title'], 'project': session_project(db, s)}
+        # Older favorites may predate any session; archived published content is
+        # still readable for the owner of that personal record, never its draft.
+        for bank in items(db, 'bank'):
+            for q in bank['questions']:
+                if q['id'] in state['favorites'] and q['id'] not in records:
+                    records[q['id']] = {'question': q, 'session_id': None, 'index': None, 'title': bank['title'], 'project': session_project(db, {'bank_id': bank['id']})}
         return state | {'records': list(records.values()), 'total': len(submitted), 'correct': sum(a['correct'] for _, a in submitted), 'coverage': len(covered), 'available': len(active)}
 
 

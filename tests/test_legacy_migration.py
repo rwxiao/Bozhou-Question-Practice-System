@@ -72,6 +72,8 @@ def test_legacy_banks_are_private_until_assigned(system):
     assert [b['id'] for b in visible] == [bid]
     assert visible[0]['project_id'] == project['id']
     assert learner.get('/api/learning/directories').json() == {'years': [year], 'projects': [project]}
+    # First assignment now fixes the old session's source without changing answers.
+    before_session['project'] = {'id': project['id'], 'name': project['name'], 'year_id': year['id'], 'year_name': year['name']}
     assert device.get(f'/api/sessions/{sid}').json() == before_session
     after_learning = learner.get('/api/learning').json()
     for key in ['mistakes', 'favorites', 'cursors', 'total', 'correct']:
