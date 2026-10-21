@@ -256,6 +256,29 @@ def disable_user(uid: str, request: Request):
     return {'ok': True}
 
 
+@app.delete('/api/users/{uid}')
+def delete_user(uid: str, body: dict, request: Request):
+    with transaction() as db:
+        actor = user(db, request, admin=True)
+        if body.get('confirm') is not True:
+            fail(400, '请明确确认彻底删除账号及个人学习记录')
+        target = db.execute('SELECT * FROM users WHERE id=?', (uid,)).fetchone()
+        if not target:
+            return {'ok': True}
+        if target['role'] != 'user':
+            fail(400, '只能删除普通用户账号')
+        db.execute('DELETE FROM logins WHERE user_id=?', (uid,))
+        db.execute("DELETE FROM objects WHERE owner=? AND kind IN ('session','learning')", (uid,))
+        # Keep question corrections useful without retaining a deleted submitter reference.
+        for report in items(db, 'report', uid):
+            report['user_id'] = None
+            put(db, 'report', report)
+        db.execute("UPDATE objects SET owner='' WHERE kind='report' AND owner=?", (uid,))
+        db.execute('DELETE FROM users WHERE id=?', (uid,))
+        db.execute('INSERT INTO audit(actor,action,target,at) VALUES(?,?,?,?)', (actor['id'], 'delete_user', uid, time.time()))
+    return {'ok': True}
+
+
 @app.post('/api/users/{uid}/reset')
 def reset(uid: str, body: dict, request: Request):
     validate_password(body.get('password'))

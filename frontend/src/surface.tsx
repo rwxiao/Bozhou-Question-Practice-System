@@ -104,7 +104,7 @@ const options: HTMLReactParserOptions = {replace(node){
   if(node.name==='button')return action(node);
   if(node.name==='input'){
     if(node.attribs.type==='checkbox'&&(node.attribs['data-select-question']||node.attribs['data-select-all']))return <input {...props} type="checkbox" className="bulk-checkbox"/>;
-    if(node.attribs.type==='checkbox')return <Checkbox name={node.attribs.name} id={inputId(node)} defaultChecked={'checked' in node.attribs} />;
+    if(node.attribs.type==='checkbox')return <Checkbox name={node.attribs.name} id={inputId(node)} required={'required' in node.attribs} defaultChecked={'checked' in node.attribs} />;
     const {value, ...inputProps} = props;
     return <Input {...inputProps} defaultValue={typeof value==='string'?value:undefined} spellCheck={node.attribs.name==='username'?false:undefined} id={inputId(node)} />;
   }
@@ -117,6 +117,7 @@ const options: HTMLReactParserOptions = {replace(node){
   if(node.name==='label'){
     const control=node.children.find(n=>n instanceof Element&&['input','textarea','select'].includes(n.name)) as Element|undefined;
     if(!control)return <Field><FieldLabel asChild><label>{children(node)}</label></FieldLabel></Field>;
+    if(control.attribs.type==='checkbox'&&control.attribs.name==='confirm')return <Field orientation="horizontal">{domToReact([control],options)}<FieldLabel htmlFor={inputId(control)}>{domToReact((node.children as DOMNode[]).filter(n=>n!==control),options)}</FieldLabel></Field>;
     return <Field><FieldLabel htmlFor={inputId(control)}>{domToReact((node.children as DOMNode[]).filter(n=>n!==control),options)}</FieldLabel>{domToReact([control],options)}</Field>;
   }
   if(has(node,'stats'))return <div className="stats">{node.children.filter(n=>n instanceof Element).map((n,i)=><Card key={i} className="stat-card"><CardContent>{domToReact((n as Element).children as DOMNode[],options)}</CardContent></Card>)}</div>;
